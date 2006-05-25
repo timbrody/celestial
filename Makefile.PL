@@ -5,7 +5,9 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME              => 'Celestial',
     VERSION_FROM      => 'lib/Celestial.pm', # finds $VERSION
-    PREREQ_PM         => {}, # e.g., Module::Name => 1.1
+    PREREQ_PM         => {
+			HTTP::OAI => 3.17,
+		}, # e.g., Module::Name => 1.1
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
       (ABSTRACT_FROM  => 'lib/Celestial.pm', # retrieve abstract from module
        AUTHOR         => 'Timothy D Brody <tdb01r@localdomain>') : ()),
