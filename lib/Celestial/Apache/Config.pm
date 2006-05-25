@@ -3,8 +3,7 @@ package Celestial::Apache::Config;
 use strict;
 use warnings;
 
-my $CFG_FILE = "/home/celestial/etc/celestial.conf";
-my $PHRASES_FILE = "/home/celestial/etc/en_GB.yml";
+use Celestial::Config; # Exports $SETTINGS
 
 use CGI qw/-oldstyle_urls/;
 use URI;
@@ -52,7 +51,7 @@ sub handler
 
 ###########################################################
 
-	my $dbh = Celestial::DBI->connect($CFG_FILE) 
+	my $dbh = Celestial::DBI->connect()
 		or die("Unable to connect to database: $!");
 	my $dom = XML::LibXML::Document->new('1.0','UTF-8');
 
@@ -66,7 +65,6 @@ sub handler
 		my $action = CGI::param('action') || '';
 
 		$cgi = Celestial::CGI->new(
-				phrases => $PHRASES_FILE,
 				request => $r,
 				section => $section,
 				action => $action,
@@ -121,7 +119,7 @@ sub handler
 
 # Top navigation bar
 	$body->appendChild(my $topbar = dataElement( 'div', undef, {class=>'topbar'} ));
-	$topbar->appendChild($navbar = dataElement( 'ul', undef, {class=>'navbar'} ));
+	$topbar->appendChild(my $navbar = dataElement( 'ul', undef, {class=>'navbar'} ));
 
 	my $section = $Handler::DEFAULT;
 
@@ -156,9 +154,13 @@ sub handler
 	if( $r->status == OK ) {
 		$dom->toFH(\*STDOUT,1);
 	}
+
+	return $r->status;
 }
 
 package Celestial::CGI;
+
+use Celestial::Config; # Exports $SETTINGS
 
 use YAML;
 use vars qw( $AUTOLOAD );
@@ -166,7 +168,7 @@ use Apache::Const qw( REDIRECT );
 
 sub new {
 	my( $class, %opts ) = @_;
-	$opts{phrases} = load_phrases($opts{'phrases'});
+	$opts{phrases} = load_phrases($Celestial::Config::SETTINGS->{ languages }->{ en_GB });
 	bless \%opts, $class;
 }
 
@@ -344,7 +346,7 @@ sub set_cookie {
 sub get_cookie {
 	my( $self, $CGI ) = @_;
 
-	my $hdr = $CGI->request->headers_in->{ 'Cookie' };
+	my $hdr = $CGI->request->headers_in->{ 'Cookie' } or return;
 	my @jar = map { split /=/, $_, 2 } split /;/, $hdr;
 	return unless @jar % 2 == 0;
 	my %cookies = @jar;

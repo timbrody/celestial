@@ -52,6 +52,8 @@ There is no facility for removing single records, instead you should addRecord w
 use strict;
 use warnings;
 
+use Celestial::Config;
+
 use POSIX qw/strftime/;
 use DBI;
 use XML::LibXML;
@@ -94,28 +96,19 @@ Given a single argument it is treated as the name of a Celestial config file, mu
 sub connect {
 	my $class = shift;
 	my $self = $class->new();
-	if( @_ == 1 ) {
-		my $dom;
-		if( ref($_[0]) ) {
-			$dom = $_[0];
-		} else {
-			open my $fh, "<$_[0]" or die $!;
-			$dom = XML::LibXML->new->parse_fh($fh);
-			close($fh);
-		}
-		my ($db) = $dom->getElementsByTagName('database');
-		my %DB;
-		for (grep { $_->hasChildNodes } $db->getChildNodes) {
-			$DB{$_->nodeName} = $_->getFirstChild->toString;
-		}
-		return $class->connect("dbi:mysql:host=$DB{host};database=$DB{database};port=$DB{port}",
-			$DB{username},
-			$DB{password},
-		);
-	} else {
-		$self->dbh(DBI->connect(@_)) or return undef;
-		return $self;
+	my $db = $Celestial::Config::SETTINGS
+		or die "Unable to get database settings";
+	my $user = $db->{ username };
+	my $pw = $db->{ password };
+	my @opts;
+	for(qw( database host port )) {
+		next unless exists( $db->{ $_ });
+		push @opts, join( '=', $_ => $db->{ $_ });
 	}
+	my $dsn = "dbi:mysql:" . join(';', @opts);
+	$self->dbh(DBI->connect($dsn, $user, $pw))
+		or return undef;
+	return $self;
 }
 
 =pod
