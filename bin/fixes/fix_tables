@@ -1,0 +1,74 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "../../etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my $TABLE_SCHEMA = " \
+		( \
+		  id int(10) unsigned NOT NULL AUTO_INCREMENT, \
+		  datestamp datetime, \
+		  cursor bigint unsigned, \
+		  identifier blob NOT NULL, \
+		  header longblob NOT NULL, \
+		  metadata longblob, \
+		  about longblob, \
+		  PRIMARY KEY  (id), \
+		  KEY (cursor), \
+		  KEY identifier (identifier(128)) \
+		) TYPE=MyISAM; \
+";
+
+my $sth = $dbh->prepare("SHOW TABLES");
+$sth->execute;
+my %TABLES;
+while( my($name) = $sth->fetchrow_array )
+{
+	$TABLES{$name} = 1;
+}
+
+my @repos = $dbh->listRepositories;
+
+foreach my $r (@repos)
+{
+	$dbh->lock($r->id);
+
+	print "Processing ", $r->identifier, "\n";
+
+	my @mdfs = $r->listMetadataFormats;
+	foreach my $mdf (@mdfs)
+	{
+		printf "Updating [%s] %s\n", $mdf->metadataPrefix, $mdf->table;
+		unless( exists($TABLES{$mdf->table}) )
+		{
+			printf("Missing table: %s\n",
+				$mdf->table,
+			);
+			$dbh->do("CREATE TABLE " . $mdf->table . " " . $TABLE_SCHEMA);
+		}
+
+		local $dbh->dbh->{RaiseError} = 0;
+		local $dbh->dbh->{PrintError} = 0;
+		if( $dbh->do("ALTER TABLE " . $mdf->table . " ADD accession DATETIME AFTER datestamp, ADD KEY(accession)") )
+		{
+			print "Adding accession\n";
+			$dbh->do("UPDATE " . $mdf->table . " SET accession=DATE_FORMAT(SUBSTRING(about,locate(\"<datestamp>\",about)+11,10),\"\%Y\%m\%d\")");
+		}
+
+		if( $dbh->do("ALTER TABLE " . $mdf->table . " ADD status ENUM('deleted') AFTER identifier, DROP KEY accession, ADD KEY(accession,status)") )
+		{
+			print "Adding status\n";
+			$dbh->do("UPDATE " . $mdf->table . " SET status='deleted' WHERE header like '\%status=\"deleted\"\%'");
+		}
+	}
+
+	$dbh->unlock($r->id);
+}

@@ -1,0 +1,54 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+use HTTP::OAI;
+
+$CFG_FILE = "../../etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my $parser = XML::LibXML::SAX->new;
+
+foreach my $repo ($dbh->listRepositories) {
+	my $mdf = $repo->getMetadataFormat('oai_dc');
+	unless($mdf) {
+		warn "Skipping " . $repo->identifier . " [" . $repo->id . "]";
+		next;
+	}
+	my $sth = $dbh->prepare("SELECT `id`,`setSpec` FROM ".$repo->sets_table);
+	$sth->execute;
+	my (%sets,%unknown);
+	while( my $row = $sth->fetchrow_arrayref ) {
+		$sets{$row->[1]} = $row->[0];
+	}
+	$sth = $dbh->prepare("SELECT `id`,`header` FROM ".$mdf->table);
+	$sth->execute or die $!;
+	$dbh->do("DELETE FROM " . $repo->setmemberships_table);
+	$dbh->do("ALTER TABLE ". $repo->setmemberships_table . " ADD KEY(`record`,`set`)");
+	while( my $row = $sth->fetchrow_arrayref ) {
+		my $recid = $row->[0];
+		my $rec;
+		$parser->set_handler(HTTP::OAI::SAXHandler->new(
+			Handler => $rec = HTTP::OAI::Header->new
+		));
+		$parser->parse_string($row->[1]);
+		print STDERR $repo->setmemberships_table . " " . $rec->identifier . "                                 \r";
+		foreach my $set ($rec->setSpec) {
+			my $setid = $sets{$set};
+			unless(defined($setid)) {
+				$unknown{$set}++;
+				next;
+			}
+			$repo->addSetMembership($setid,$recid);
+		}
+	}
+	for(keys %unknown) {
+		warn sprintf("Unknown set: %s (%d times)\n", $_, $unknown{$_});
+	}
+}

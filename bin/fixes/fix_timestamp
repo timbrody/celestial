@@ -1,0 +1,29 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "/home/celestial/etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my $sth = $dbh->prepare("SHOW TABLES");
+$sth->execute;
+my @tables;
+while( my ($t) = $sth->fetchrow_array )
+{
+	push @tables, $t if $t =~ /^Metadata_/;;
+}
+$sth->finish;
+
+for(@tables)
+{
+warn "$_\n";
+#	$dbh->do("ALTER TABLE Metadata_$i CHANGE datestamp datestamp datetime");
+	$dbh->do("UPDATE $_ SET cursor=concat(DATE_FORMAT(datestamp,'\%Y\%m\%d\%H\%i\%S'),lpad(mod(id,1000),3,'0'))");
+}

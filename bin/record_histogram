@@ -1,0 +1,251 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+%EPRINTS = (
+#"http://cogprints.ecs.soton.ac.uk/perl/oai2"=>1,
+#"http://eprints.ecs.soton.ac.uk/perl/oai2"=>1,
+#"http://eprints.lub.lu.se/perl/oai"=>1,
+"http://eprints.ens-lsh.fr/perl/oai2"=>1,
+"http://diss-epsilon.slu.se/perl/oai"=>1,
+"http://archiveSIC.ccsd.cnrs.fr/perl/oai20"=>1,
+"http://edoc.ub.uni-muenchen.de/perl/oai2"=>1,
+"http://jeanNicod.ccsd.cnrs.fr/perl/oai20"=>1,
+"http://tel.ccsd.cnrs.fr/perl/oai20"=>1,
+"http://archiveSIC.ccsd.cnrs.fr/perl/oai"=>1,
+"http://caltechcstr.library.caltech.edu/perl/oai"=>1,
+"http://caltecheerl.library.caltech.edu/perl/oai"=>1,
+"http://cav2001.library.caltech.edu/perl/oai"=>1,
+"http://dlc.dlib.indiana.edu/perl/oai"=>1,
+"http://eprints.may.ie/perl/oai"=>1,
+"http://eprints.univ-lyon2.fr:8050/perl/oai"=>1,
+"http://etdindividuals.dlib.vt.edu/perl/oai"=>1,
+"http://hofprints.hofstra.edu/perl/oai"=>1,
+"http://eprints.riacs.edu/perl/oai"=>1,
+"http://pastel.paristech.org/perl/oai"=>1,
+"http://preprint.usu.edu/perl/oai"=>1,
+"http://sammelpunkt.philo.at:8080/perl/oai"=>1,
+"http://tel.ccsd.cnrs.fr/perl/oai"=>1,
+"http://www-db.library.nottingham.ac.uk/perl/oai"=>1,
+"http://thesis.library.drexel.edu/perl/oai2"=>1,
+"http://dlist.sir.arizona.edu/perl/oai2"=>1,
+"http://www.orgprints.org/perl/oai"=>1,
+"http://aerosolscitech.caltech.edu/perl/oai"=>1,
+"http://amsacta.cib.unibo.it/perl/oai"=>1,
+"http://amscampus.cib.unibo.it/perl/oai"=>1,
+"http://amsmisc.cib.unibo.it/perl/oai"=>1,
+"http://archives.cs.iastate.edu/perl/oai"=>1,
+"http://biblio.unifi.it/perl/oai"=>1,
+"http://caltechasci.library.caltech.edu/perl/oai"=>1,
+"http://caltechgalcitfm.library.caltech.edu/perl/oai"=>1,
+"http://caltechgalcitsm.library.caltech.edu/perl/oai"=>1,
+"http://caltechlib.library.caltech.edu/perl/oai"=>1,
+"http://dlist.sir.arizona.edu/perl/oai"=>1,
+"http://edoc.bib.ucl.ac.be:82/perl/oai"=>1,
+"http://eprint.uq.edu.au/perl/oai"=>1,
+"http://eprints-test.cab.unipd.it:8080/perl/oai"=>1,
+"http://eprints.aktors.org/perl/oai"=>1,
+"http://eprints.anu.edu.au/perl/oai"=>1,
+"http://eprints.bath.ac.uk/perl/oai"=>1,
+"http://eprints.biblio.unitn.it/perl/oai"=>1,
+"http://eprints.cddc.vt.edu/perl/oai"=>1,
+"http://eprints.cdlr.strath.ac.uk/perl/oai"=>1,
+"http://eprints.cs.vt.edu/perl/oai"=>1,
+"http://eprints.fizika.org:2101/perl/oai"=>1,
+"http://eprints.iisc.ernet.in/perl/oai"=>1,
+"http://eprints.it.ss.titech.ac.jp/perl/oai"=>1,
+"http://eprints.ladark.dkc.jhu.edu/perl/oai"=>1,
+"http://eprints.lib.gla.ac.uk/perl/oai"=>1,
+"http://eprints.mts.jhu.edu/perl/oai"=>1,
+"http://eprints.rclis.org/perl/oai"=>1,
+"http://eprintsdemo.wwwconf.ecs.soton.ac.uk/perl/oai"=>1,
+"http://genesis2.jpl.nasa.gov/perl/oai"=>1,
+"http://htpprints.yorku.ca/perl/oai"=>1,
+"http://iubio.bio.indiana.edu:7780/perl/oai"=>1,
+"http://test.wustl.edu/perl/oai"=>1,
+"http://ndltdpapers.dlib.vt.edu/perl/oai"=>1,
+"http://newmedia.ulst.ac.uk/perl/oai"=>1,
+"http://papyrus.bib.umontreal.ca/perl/oai"=>1,
+"http://psycprints.ecs.soton.ac.uk/perl/oai"=>1,
+"http://test-epsilon.slu.se/perl/oai"=>1,
+"http://vfak-epsilon.slu.se/perl/oai"=>1,
+"http://webvoy.uwindsor.ca:8089/perl/oai"=>1,
+"http://wisdomarchive.wisdom.weizmann.ac.il/perl/oai"=>1,
+"http://wos.nus.edu.sg/perl/oai"=>1,
+"http://www.bbsonline.org/perl/oai"=>1,
+"http://www.iis.ee.ic.ac.uk:81/perl/oai"=>1,
+"http://mangueira.ibict.br/perl/oai"=>1,
+"http://eprints.fri.uni-lj.si/perl/oai2"=>1,
+"http://caltechbook.library.caltech.edu/perl/oai"=>1,
+"http://caltechcdstr.library.caltech.edu/perl/oai"=>1,
+"http://oralhistories.library.caltech.edu/perl/oai"=>1,
+"http://caltechparadise.library.caltech.edu/perl/oai"=>1,
+);
+
+#%EPRINTS = (
+#"http://hpds1.mit.edu/oai/"=>1,
+#);
+
+# Institutional/e-prints/full-text
+%EPRINTS = (
+"http://archives.cs.iastate.edu/perl/oai"=>1,
+"http://archiveSIC.ccsd.cnrs.fr/perl/oai20"=>1,
+"http://biblio.unifi.it/perl/oai"=>1,
+"http://bis-oai.bis.uni-oldenburg.de/OAi/service.php"=>1,
+"http://cav2001.library.caltech.edu/perl/oai"=>1,
+"http://edoc.bib.ucl.ac.be:82/perl/oai"=>1,
+"http://eprint.uq.edu.au/perl/oai"=>1,
+"http://eprints.anu.edu.au/perl/oai"=>1,
+"http://eprints.biblio.unitn.it/perl/oai"=>1,
+"http://eprints.cs.vt.edu/perl/oai"=>1,
+"http://eprints.iisc.ernet.in/perl/oai"=>1,
+"http://eprints.lib.gla.ac.uk/perl/oai"=>1,
+"http://eprints.may.ie/perl/oai"=>1,
+"http://eprints.riacs.edu/perl/oai"=>1,
+"http://epub.wu-wien.ac.at:80/dyn/OAI/oaicgi.pl"=>1,
+"http://eprints.ens-lsh.fr/perl/oai2"=>1,
+"http://eprints.fri.uni-lj.si/perl/oai2"=>1,
+"http://genesis2.jpl.nasa.gov/perl/oai"=>1,
+"http://hsss.slub-dresden.de/hsss/servlet/hsss.oai.OAIServlet"=>1,
+"http://jeanNicod.ccsd.cnrs.fr/perl/oai20"=>1,
+"http://preprint.usu.edu/perl/oai"=>1,
+"http://publications.uu.se/OAI"=>1,
+"http://sammelpunkt.philo.at:8080/perl/oai"=>1,
+"http://wisdomarchive.wisdom.weizmann.ac.il/perl/oai"=>1,
+"http://www-db.library.nottingham.ac.uk/perl/oai"=>1,
+);
+
+%EPRINTS_EXCLUDE = (
+"http://alcme.oclc.org/xtcat/servlet/OAIHandler"=>1,
+"http://citebase.eprints.org/cgi-bin/oai2"=>1,
+);
+
+$CFG_FILE = "/home/celestial/etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my @REPOS = $dbh->listRepositories();
+my %tables;
+
+foreach my $repo (@REPOS) {
+	next unless $EPRINTS{$repo->baseURL};
+	next if $EPRINTS_EXCLUDE{$repo->baseURL};
+	my @MDFS = $repo->listMetadataFormats();
+	for (@MDFS) {
+		if( $_->metadataPrefix eq 'oai_dc' ) {
+			$tables{$repo->baseURL} = {table=>$_->table};
+		}
+	}
+}
+
+my %histogram;
+
+my $total = 0;
+
+my %repos;
+
+foreach my $url (keys %tables) {
+	my $table = $tables{$url}->{table};
+	if( !$dbh->table_exists($table) ) {
+		die "Screwed up";
+	}
+	my $card = $dbh->cardinality($table);
+	$total += $card;
+#	warn $url, "\t", $table, "\t", $card, "\n";
+	my $sth = $dbh->prepare("SELECT UNIX_TIMESTAMP(CONCAT(SUBSTRING(about,locate(\"datestamp>\",about)+10,7),\"-01\")) FROM $table WHERE LOCATE(\"datestamp>\",about)");
+	$sth->execute or die $!;
+	my $datestamp;
+	$sth->bind_columns(\$datestamp);
+	my $c = 0;
+	while( $sth->fetch ) {
+		$histogram{$datestamp}->{'total'}++;
+		$histogram{$datestamp}->{$url}++;
+		$repos{$url}->{'total'}++;
+	}
+}
+
+my %seenrepo;
+
+foreach my $ds (sort { $a <=> $b } keys %histogram) {
+	foreach my $url (grep { $_ ne 'total' } keys %{$histogram{$ds}}) {
+#warn "$url\n" unless exists($repos{$url});
+		unless (exists($seenrepo{$url})) {
+			print $url, "\t", $repos{$url}->{'total'}, "\t", strftime("%Y-%m-%d",localtime($ds)), "\n";
+			$repos{$url}->{'earliest'} = $ds;
+		}
+		$seenrepo{$url} = 1;
+		$histogram{$ds}->{'archives'} = keys %seenrepo;
+	}
+#	$total += $histogram{$ds}->{'total'};
+#	$histogram{$ds}->{'avg'} = $total/keys(%repos);
+}
+
+print "\n__END_OF_SUMMARY__\t$total total oai_dc records\n\n";
+
+# Fill in missing days with 0
+#my @dates = sort keys %histogram;
+#my $date = $dates[0];
+#while( $date < $dates[$#dates] ) {
+#	$date += 86400;
+#	$histogram{$date} = 0 unless exists($histogram{$date});
+#}
+
+print "__Record histogram\n";
+
+foreach my $date (sort { $a <=> $b } keys %histogram) {
+	print strftime("%Y-%m-%d",localtime($date)), "\t", $histogram{$date}->{'total'}, "\t", $histogram{$date}->{'archives'}, "\n";
+}
+
+print "__Per-archive Histogram\n";
+print "\t", join("\t",map { strftime("%Y-%m-%d",localtime($_)) } sort { $a <=> $b } keys %histogram), "\n";
+print "No. of Archives\t", join("\t", map { $histogram{$_}->{'archives'} } sort { $a <=> $b } keys %histogram), "\n";
+foreach my $url (keys %repos) {
+	print $url, "\t", join("\t", map { $histogram{$_}->{$url} || '' } sort { $a <=> $b } keys %histogram), "\n";
+}
+
+#print join("\t",'Date','Archives',keys %repos), "\n";
+#foreach my $date (sort { $a <=> $b } keys %histogram) {
+#	print strftime("%Y-%m-%d",localtime($date)),
+#		"\t", $histogram{$date}->{'archives'};
+#	foreach my $url (keys %repos) {
+#		print "\t", ($histogram{$date}->{$url}||'');
+#	}
+#	print "\n";
+#}
+
+print "__Record-latency Histogram\n";
+my %latency;
+foreach my $ds (sort { $a <=> $b } keys %histogram) {
+	foreach my $url (grep { $_ ne 'total' && $_ ne 'archives' } keys %{$histogram{$ds}}) {
+		my $td = time_to_month($ds) - time_to_month($repos{$url}->{'earliest'});
+		$latency{$td}->{'total'} += $histogram{$ds}->{$url};
+		$latency{$td}->{'archives'}++;
+	}
+}
+my $repocount = 0;
+foreach my $ds (sort { $b <=> $a } keys %latency) {
+#	print strftime("%Y-%m-%d",localtime($ds)), "\t", $latency{$ds}, "\n";
+	$repocount = $latency{$ds}->{'archives'} if $latency{$ds}->{'archives'} > $repocount;
+	print $ds, "\t", $latency{$ds}->{'total'}, "\t", $latency{$ds}->{'archives'}, "\n";
+}
+
+$dbh->disconnect;
+
+sub get_datestamp {
+	my $about = shift;
+	if( $about =~ /datestamp>(\d{4}-\d{2}-\d{2})/ ) {
+		return $1;
+	} else {
+		return '0000-00-00';
+	}
+}
+
+sub time_to_month {
+	return (shift()/2592000)%2592000;
+}

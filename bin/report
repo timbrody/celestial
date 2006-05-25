@@ -1,0 +1,192 @@
+#!/usr/bin/perl -w -I../lib
+
+=head1 NAME
+
+B<report> - generate and deliver all reports that are due
+
+=head1 SYNOPSIS
+
+B<report> [B<options>]
+
+=head1 DESCRIPTION
+
+Generates reports from the Celestial database and delivers them to configured email addresses.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--dryrun>
+
+Print reports to stdout instead of emailing.
+
+=item B<--help>
+
+Show this page.
+
+=item B<--list>
+
+List all configured repositories.
+
+=item B<--verbose>
+
+Be more verbose.
+
+=back
+
+=cut
+
+use strict;
+use warnings;
+
+our $CFG_FILE = "/home/eprints/celestial/etc/celestial.conf";
+
+use POSIX qw/:sys_wait_h strftime/;
+
+use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $MAILHOST);
+
+$VERSION = '3.02';
+$HTTP_TIMEOUT = 300; # In seconds
+$MAILHOST = 'mail.ecs.soton.ac.uk';
+
+use Getopt::Long;
+use Pod::Usage;
+
+use Celestial::DBI;
+use Date::Parse;
+use File::Temp;
+use Net::SMTP;
+
+use constant {
+	WITH_DAYS => 1,
+	WITH_SECONDS => 2
+};
+
+my( $opt_verbose, $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_dryrun );
+$opt_verbose = 0;
+$opt_fork = 1;
+
+GetOptions(
+	'verbose+' => \$opt_verbose,
+	'list' => \$opt_list,
+	'repository=s' => \$opt_repository,
+	'help' => \$opt_help,
+	'cfg=s' => \$opt_cfg,
+	'fork!' => \$opt_fork,
+	'identifier=s' => \$opt_identifier,
+	'force' => \$opt_force,
+	'dryrun' => \$opt_dryrun,
+) or pod2usage("Invalid argument");
+
+pod2usage(1) if $opt_help;
+
+if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
+	pod2usage("Repository argument must be numeric.");
+}
+
+$DEBUG = $opt_verbose;
+$CFG_FILE = $opt_cfg if $opt_cfg;
+
+my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my $sth = $dbh->prepare("SELECT type,value FROM Configuration");
+$sth->execute;
+while( my ($type,$value) = $sth->fetchrow_array ) {
+	$ADMINEMAIL = $value if( $type eq 'adminEmail' );
+	$MAX_HARVESTERS = $value if( $type eq 'maxHarvesters' );
+}
+$sth->finish;
+
+# Set up the environment
+$0 = "celestial-report";
+
+# Current number of active harvesters
+my $c = 0;
+
+my @REPOS = $dbh->listRepositories();
+
+if( $opt_list ) {
+	print "id\tidentifier\n";
+	for (sort { $a->id <=> $b->id } @REPOS) {
+		printf("%d\t%s\t%s\n", $_->id, $_->identifier, $_->baseURL);
+	}
+	exit(0);
+}
+
+my $smtp = Net::SMTP->new( $MAILHOST );
+
+foreach my $repo (@REPOS)
+{
+	foreach my $rep (grep { $_->isDue } $repo->listReports) {
+		my $msg = generate_report($rep);
+		$msg = "To: " . $rep->email . "\n" .
+			"Subject: Celestial Report for " . $repo->identifier . "\n\n" .
+			$msg;
+		if( $opt_dryrun ) {
+			print $msg;
+			next;
+		}
+		$smtp->mail( $ADMINEMAIL );
+		$smtp->to( $rep->email );
+		$smtp->data($msg);
+		$rep->touch();
+	}
+}
+
+$smtp->quit;
+
+$dbh->disconnect;
+
+sub generate_report
+{
+	my $rep = shift;
+	my $dbh = $rep->dbh;
+	my $repo = $rep->repository;
+
+	my $str = "Celestial report for: " . $repo->identifier . "\n";
+	$str .= "OAI Base URL: <" . $repo->baseURL . ">\n\n";
+
+	$str .= "This report covers the period" .
+		($rep->previous ? " " . $rep->previous : "") .
+		" to " . $dbh->now() . ".\n\n";
+
+	$str .= "Metadata Formats Harvested\n\n";
+	foreach my $mdf ($repo->listMetadataFormats) {
+		$str .= $mdf->metadataPrefix . ":\n";
+		$str .= "Most recent attempted harvest: " . ($mdf->lastAttempt||'never') . "\n";
+		$str .= "Most recent successful harvest: " . ($mdf->lastHarvest||'never') . "\n";
+	}
+	$str .= "\n";
+
+	# Errors
+	my %errs = $rep->errorsReport;
+	$str .= %errs ?
+		"Errors Encountered\n\n" :
+		"No errors encountered in period.\n";
+	foreach my $mdp (sort { $a cmp $b } keys %errs ) {
+		foreach my $err (@{$errs{$mdp}}) {
+			$str .= sprintf("\t%s\t%s\n", $mdp, $err);
+		}
+	}
+	$str .= "\n";
+
+	# Records
+	my %recs = $rep->recordsReport;
+	$str .= "New Metadata Records\n\n";
+	foreach my $mdp (sort { $a cmp $b } keys %recs) {
+		$str .= sprintf("\t%d\t%s\n", $recs{$mdp}, $mdp);
+	}
+	$str .= "\n";
+
+	# Fulltexts
+	my %fts = $rep->fulltextsReport;
+	$str .= %fts ?
+		"Full-text Formats Identified\n\n" :
+		"No full-texts identified in period.\n";
+	foreach my $fmt (sort { $a cmp $b } keys %fts) {
+		$str .= sprintf("\t%d\t%s\n", $fts{$fmt}, $fmt);
+	}
+	$str .= "\n";
+
+	return $str;
+}

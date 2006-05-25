@@ -1,0 +1,21 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "../../etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+foreach my $repo ($dbh->listRepositories) {
+	my $mdf = $repo->getMetadataFormat( 'oai_dc' ) or next;
+	my $ftt = $mdf->getFulltext;
+	my $tblname = $ftt->table;
+	$dbh->do("ALTER TABLE $tblname CHANGE id record INT UNSIGNED NOT NULL");
+	print $tblname, "\n";
+}

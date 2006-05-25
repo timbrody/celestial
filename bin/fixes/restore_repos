@@ -1,0 +1,73 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use HTTP::OAI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "../../etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+while(defined(my $baseURL = <>))
+{
+	chomp($baseURL); next unless $baseURL;
+	if( defined($dbh->getRepositoryBaseURL($baseURL)) ) {
+		next;
+	}
+	my $ha = HTTP::OAI::Harvester->new(baseURL=>$baseURL,debug=>1);
+	my $id = $ha->Identify;
+	my $r = $ha->ListRecords(metadataPrefix=>'oai_dc');
+	unless( $r->is_success ) {
+		warn "ListRecords failed for $baseURL\n";
+		next;
+	}
+	my $rec = $r->next;
+	unless( $rec ) {
+		warn "Error getting ListRecords for $baseURL: no records found\n";
+		next;
+	}
+	warn "Searching for: " . $rec->identifier . "\n";
+	my $repo;
+	my @repoids;
+	foreach my $row ($dbh->listIdsByIdentifier($rec->identifier))
+	{
+		$repo = Celestial::Repository->new({
+			id=>$row->[0],
+			identifier=>$id->repositoryName||$baseURL,
+			baseURL=>$baseURL,
+			Identify=>$id->toDOM->toString,
+			dbh=>$dbh,
+		});
+		push @repoids, $repo->id;
+		my $mdf = $repo->getMetadataFormat( 'oai_dc' );
+		my $ds = $mdf->getRecordAccession( $row->[2] );
+		if( !$ds ) {
+			warn "No accession in ".join(',',@$row)."\n";
+			$repo = undef;
+			next;
+		}
+		if( $ds =~ /000000$/ ) {
+			$ds = substr(Celestial::DBI::datestamp($ds),0,10);
+		} else {
+			$ds = Celestial::DBI::datestamp($ds);
+		}
+		if( $ds eq $rec->datestamp ) {
+			warn "Datestamps match [$ds == ".$rec->datestamp."]\n";
+			last;
+		} else {
+			warn "Datestamps don't match [$ds != ".$rec->datestamp."]\n";
+			$repo = undef;
+		}
+	}
+	unless( $repo ) {
+		warn "Unable to determine repository id [".join(',',@repoids)."], ignoring\n";
+		next;
+	}
+	$dbh->updateRepository($repo);
+	warn "Successfully determined repository id for $baseURL: ".$repo->id."\n";
+}

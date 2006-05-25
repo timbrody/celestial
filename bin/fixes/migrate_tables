@@ -1,0 +1,39 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "../../etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my $sth = $dbh->prepare("SELECT repository,id FROM MetadataFormats");
+$sth->execute;
+while(my( $repo, $id ) = $sth->fetchrow_array ) {
+#	warn "RENAME TABLE Metadata_$id TO Records_${repo}_$id\n";
+#	$dbh->do("RENAME TABLE Metadata_$id TO Records_${repo}_$id");
+}
+
+$sth = $dbh->prepare("SELECT id FROM Repositories");
+$sth->execute;
+while(my( $repo ) = $sth->fetchrow_array ) {
+#	warn "INSERT INTO Sets_$repo SELECT id,setSpec,setName FROM Sets WHERE repository=$repo\n";
+#	$dbh->do("INSERT IGNORE INTO Sets_$repo SELECT id,setSpec,setName FROM Sets WHERE repository=$repo");
+	warn "INSERT INTO SetMemberships_$repo SELECT sid,tid FROM setMembership WHERE repository=$repo\n";
+	$dbh->do("DELETE FROM SetMemberships_$repo");
+	my $h = $dbh->prepare("SELECT id FROM MetadataFormats WHERE repository=$repo");
+	$h->execute or die $!;
+	while( my( $id ) = $h->fetchrow_array ) {
+		$dbh->do("INSERT IGNORE INTO SetMemberships_$repo SELECT sid,tid FROM setMembership WHERE repository=$id");
+	}
+#	my $h = $dbh->prepare("SELECT id FROM Sets_$repo");
+#	$h->execute or die $!;
+#	while(my( $setid ) = $h->fetchrow_array ) {
+#		$dbh->do("INSERT INTO SetDescriptions_$repo SELECT id,description FROM setDescription WHERE id=$setid");
+#	}
+}

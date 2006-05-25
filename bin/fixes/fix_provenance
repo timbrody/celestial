@@ -1,0 +1,18 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "/home/celestial/etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+for(my $i = 0; $i < 240; $i++ ) {
+	my $sth = $dbh->prepare("update Metadata_$i set about=replace(about,\"OAI_Provenance.xsd\",\"provenance.xsd\")");
+	$sth->execute;
+}

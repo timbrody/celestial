@@ -1,0 +1,40 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+use vars qw($dbh $CFG_FILE %EPRINTS %EPRINTS_EXCLUDE);
+
+use Celestial::DBI;
+use POSIX qw/strftime/;
+
+$CFG_FILE = "../../etc/celestial.conf";
+
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+my $sth = $dbh->prepare("SELECT id FROM MetadataFormats");
+$sth->execute;
+my %TABLES;
+while( my($id) = $sth->fetchrow_array )
+{
+	$TABLES{$id} = 1;
+}
+
+my @repos = $dbh->listRepositories;
+
+foreach my $r (@repos)
+{
+	print "Processing ", $r->identifier, "\n";
+
+	my @mdfs = $r->listMetadataFormats;
+	foreach my $mdf (@mdfs)
+	{
+		delete $TABLES{$mdf->id};
+	}
+}
+
+while(my( $id, $name ) = each %TABLES)
+{
+	warn "Removing unreferenced metadata: $id\n";
+	$dbh->do("DELETE FROM Status WHERE id=$id");
+}

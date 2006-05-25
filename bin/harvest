@@ -1,0 +1,674 @@
+#!/usr/bin/perl -w -I../lib
+
+=head1 NAME
+
+B<harvest> - harvest all new records
+
+=head1 SYNOPSIS
+
+B<harvest> [B<options>]
+
+=head1 DESCRIPTION
+
+This script downloads and stores all new records from configured repositories.
+
+harvest forks upto 10 child processes.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>
+
+Show this page.
+
+=item B<--dryrun>
+
+Do not write any records or touch datestamps. Will still add sets, metadata
+formats and lock/unlock. Errors encountered during the harvest are also logged.
+
+=item B<--force>
+
+Ignore repository locks (you probably don't want to do this).
+
+=item B<--identifier>
+
+Harvest only the given OAI identifier.
+
+=item B<--list>
+
+List all configured repositories.
+
+=item B<--nofork>
+
+Disable forking.
+
+=item B<--nofulltext>
+
+Disable full-text downloads and format identification.
+
+=item B<--repository>
+
+Harvest only the repository given (use B<--list> to get a list of identifiers).
+
+=item B<--verbose>
+
+Be more verbose.
+
+=back
+
+=cut
+
+use Carp;
+
+use strict;
+use warnings;
+
+binmode(STDOUT,":utf8");
+
+our $CFG_FILE = "/home/eprints/celestial/etc/celestial.conf";
+
+use POSIX qw/:sys_wait_h strftime/;
+
+use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $JAVA $DROID $DROID_SIG $MAX_FILE_SIZE);
+
+$VERSION = '3.02';
+$HTTP_TIMEOUT = 300; # In seconds
+$MAX_FILE_SIZE = 1024*1024*10; # 10MB
+
+$JAVA = '/usr/java/jdk1.5.0_06/bin/java';
+$DROID = '/home/eprints/share/DROID/DROID.jar';
+$DROID_SIG = '/home/eprints/share/DROID/DROID_SignatureFile.xml';
+
+use Getopt::Long;
+use Pod::Usage;
+
+use HTTP::OAI;
+use HTTP::OAI::Metadata::OAI_DC;
+use HTTP::OAI::FullText;
+use Celestial::DBI;
+use Date::Parse;
+use File::Temp;
+use XML::LibXML;
+
+die if $HTTP::OAI::Harvester::VERSION < 3.12;
+
+use constant {
+	WITH_DAYS => 1,
+	WITH_SECONDS => 2
+};
+
+# Disable eval() to allow easier debug
+#$HTTP::OAI::UserAgent::USE_EVAL = 0;
+#$HTTP::OAI::Response::USE_EVAL = 0;
+
+my( $opt_verbose, $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun );
+$opt_dryrun = 0;
+$opt_verbose = 0;
+$opt_fork = 1;
+$opt_fulltext = 1;
+
+GetOptions(
+	'verbose+' => \$opt_verbose,
+	'list' => \$opt_list,
+	'repository=s' => \$opt_repository,
+	'help' => \$opt_help,
+	'cfg=s' => \$opt_cfg,
+	'fork!' => \$opt_fork,
+	'identifier=s' => \$opt_identifier,
+	'force' => \$opt_force,
+	'fulltext!' => \$opt_fulltext,
+	'dryrun' => \$opt_dryrun,
+) or pod2usage("Invalid argument");
+
+pod2usage(1) if $opt_help;
+
+if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
+	pod2usage("Repository argument must be numeric.");
+}
+
+$DEBUG = $opt_verbose;
+$CFG_FILE = $opt_cfg if $opt_cfg;
+
+my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+$ADMINEMAIL = $dbh->adminEmail or die "No adminEmail configured (required to harvest)\n";
+$MAX_HARVESTERS = $dbh->maxHarvesters || 10;
+
+# Set up the environment
+$0 = "celestial-harvest";
+
+# Current number of active harvesters
+my $c = 0;
+
+my @REPOS = $dbh->listRepositories();
+
+if( $opt_list ) {
+	print "id\tidentifier\n";
+	for (sort { $a->id <=> $b->id } @REPOS) {
+		printf("%d\t%s\t%s\n", $_->id, $_->identifier, $_->baseURL);
+	}
+	exit(0);
+}
+
+my %CHILDREN;
+
+# For each repository spawn a child that will update that repository
+foreach my $repo (@REPOS) {
+	if( defined($opt_repository) && $repo->id != $opt_repository ) {
+		print "(parent) " . $repo->identifier . " (" . $repo->id . ") ignored due to command line argument\n" if $opt_verbose;
+		next;
+	}
+	if( !$dbh->lock($repo->id) && !$opt_force ) {
+		warn "(parent) " . $repo->identifier . " locked, ignoring\n";
+		next;
+	}
+	my $pid;
+	if( $opt_fork && ($pid = fork()) ) {
+		$0 = "celestial-harvest-child";
+		$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+		$c++;
+		print "(parent) $c of $MAX_HARVESTERS harvesters spawned ($pid, " . $repo->identifier . ")\n" if $opt_verbose;
+		$CHILDREN{$pid} = $repo;
+		my $r;
+		while( ($r = waitpid(-1,&WNOHANG)) > 0 ) {
+			$c--;
+			$dbh->unlock($CHILDREN{$r}->id);
+			print "(parent) Child finished: $r (" . $CHILDREN{$r}->identifier . ") $?\n" if $opt_verbose;
+			delete $CHILDREN{$r};
+		}
+		if( $c >= $MAX_HARVESTERS ) {
+			print "(parent) Waiting for harvester to finish\n" if $opt_verbose;
+			my $r = wait();
+			$c--;
+			$dbh->unlock($CHILDREN{$r}->id);
+			print "(parent) Child finished: $r (" . $CHILDREN{$r}->identifier . ") $?\n" if $opt_verbose;
+			delete $CHILDREN{$r} if $r;
+		}
+	} else {
+		die "fork() failed: $!" if( $opt_fork && !defined($pid) );
+		my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+		$repo->dbh($dbh);
+
+		print "Updating repository " . $repo->identifier ."\n" if $opt_verbose;
+		update_repository($dbh,
+			repository=>$repo,
+			adminEmail=>$ADMINEMAIL
+		);
+		print "Finished updating repository " . $repo->identifier . "\n" if $opt_verbose;
+		
+		$dbh->unlock($repo->id);
+		$dbh->disconnect;
+		exit(0) if $opt_fork;
+	}
+}
+
+while( $c-- ) {
+	print "(parent) Waiting for following harvesters to finish (pid/identifier):\n" if $opt_verbose;
+	while( my ($pid,$repo) = each %CHILDREN ) {
+		printf("\t%d\t%s\n", $pid, $repo->identifier) if $opt_verbose;
+	}
+
+	my $r = wait();
+	$dbh->unlock($CHILDREN{$r}->id);
+	print "(parent) Child finished: $r (" . $CHILDREN{$r}->identifier . ") $?\n" if $opt_verbose;
+	delete $CHILDREN{$r};
+}
+
+print "(parent) Finished harvesting, updating cardinality\n" if $opt_verbose;
+
+foreach my $repo ($dbh->listRepositories) {
+	foreach my $mdf ($repo->listMetadataFormats) {
+		my $tblname = $mdf->table;
+		my $c = 0;
+		if( $dbh->table_exists($tblname) ) {
+			$c = $dbh->cardinality( $tblname );
+		}
+		$dbh->setCardinality( $mdf, $c );
+	}
+}
+
+# Check for really broken repositories, and lock them
+unless( $opt_dryrun ) {
+	my %repos;
+	my $sth = $dbh->prepare("SELECT repository,lastHarvest>NOW() - INTERVAL 14 DAY FROM MetadataFormats WHERE lastAttempt is not Null AND lastHarvest is not Null AND lastAttempt > NOW() - INTERVAL 14 DAY");
+	$sth->execute;
+	while(my ($id,$not_updated) = $sth->fetchrow_array) {
+		$repos{$id} = $not_updated unless $repos{$id};
+	}
+	foreach my $id ( keys %repos ) {
+		next if $repos{$id};
+		my $repo = $dbh->getRepository($id) or next;
+		print "(parent) Permanently locking $id (".$repo->identifier.")\n" if $opt_verbose;
+		$dbh->lock($id,0);
+	}
+}
+
+$dbh->disconnect;
+
+sub update_repository {
+	my $dbh = shift;
+	my %args = @_;
+	my $repo = $args{repository};
+	my $adminEmail = $args{adminEmail} || '';
+	my $startTime = $dbh->now();
+
+	my ($lastURL, $lastError, $lastResponse);
+
+	my $ha = new HTTP::OAI::Harvester(baseURL=>$repo->baseURL,debug=>$DEBUG);
+	$ha->agent("Celestial/$VERSION");
+	$ha->timeout($HTTP_TIMEOUT);
+	$ha->from($adminEmail);
+	my $identify = $ha->Identify;
+	if( $identify->is_error ) {
+		my $lastError = "(" . $repo->identifier . ") Unable to get Identify: " . $identify->code . " (" . $identify->message . ")\n";
+		warn($lastError . $identify->request->uri . "\n");
+		$dbh->addRepositoryError($repo,
+			$identify->request->uri,
+			$lastError,
+			$identify->toDOM->toString,
+		);
+		return;
+	}
+	$ha->repository->version( $identify->version );
+
+	$GRANULARITY = WITH_DAYS;
+	if( $identify->granularity and
+			$identify->granularity =~ /YYYY-MM-DDThh:mm:ssZ/i )
+	{
+		$GRANULARITY = WITH_SECONDS;
+	}
+
+# warn $repo->identifier .": Protocol version " . $ha->repository->version . "\n";
+
+	$repo->identify( $identify->toDOM->toString );
+	$repo->commit;
+
+	my $ls = $ha->ListSets();
+	while( my $set = $ls->next ) {
+		$repo->addSet($set);
+	}
+	if( $ls->is_error ) {
+		my $lastError = "(" . $repo->identifier .") Error requesting ListSets: " . $ls->code . " (" . $ls->message . ")\n";
+		warn ($lastError);
+		$dbh->addRepositoryError($repo,
+				$ls->request->uri,
+				$lastError,
+				$ls->content,
+				);
+	}
+
+	my $lmdf = $ha->ListMetadataFormats();
+	if( $lmdf->is_error ) {
+		my $lastError = "(" . $repo->identifier .") Error requesting ListMetadataFormats: " . $lmdf->code . " (" . $lmdf->message . ")\n";
+		warn ($lastError);
+		$dbh->addRepositoryError($repo,
+			$lmdf->request->uri,
+			$lastError,
+			$lmdf->content
+		);
+		return;
+	}
+
+	my $harvest_func = ((defined($repo->harvestMethod) and $repo->harvestMethod eq 'GetRecord') or defined($opt_identifier)) ? \&harvest_GetRecord : \&harvest_ListRecords;
+
+	my $latestHarvest = 0;
+
+	my @mdfs = map { $repo->addMetadataFormat($_) } $lmdf->metadataFormat;
+
+	foreach my $mdf (@mdfs) {
+		my $lastHarvest = $dbh->lastHarvest($mdf);
+		$latestHarvest = $lastHarvest if( $lastHarvest && $lastHarvest > $latestHarvest );
+
+		$dbh->lastAttempt($mdf, $dbh->now);
+		my $token = $dbh->lastToken($mdf);
+		my ($lastURL, $lastError, $lastResponse) = &$harvest_func($dbh,
+			harvestAgent=>$ha,
+			repository=>$repo,
+			metadataFormat=>$mdf,
+			from=>datestamp($lastHarvest, $GRANULARITY == WITH_SECONDS),
+			resumptionToken=>$token,
+		);
+		if( $lastError ) {
+			warn $lastError;
+			$dbh->addError($mdf,$lastURL,$lastError,$lastResponse);
+			my $uri = URI->new($lastURL);
+			my %args = $uri->query_form;
+			$dbh->lastToken( $mdf, undef );
+			if( $args{ 'resumptionToken' } and (!defined($token) or $token ne $args{ 'resumptionToken' }) ) {
+				warn $mdf->repository->identifier . ": Storing resumption token for future retry [$args{resumptionToken}]\n" if $opt_verbose;
+				$dbh->lastToken( $mdf, $args{ resumptionToken });
+			}
+		} elsif( !$opt_dryrun and !defined($opt_identifier) ) {
+			$dbh->lastHarvest($mdf,$startTime);
+		}
+	}
+
+	if( $identify->version ne '2.0s' and $identify->version < 2.0 ) {
+		($lastURL, $lastError, $lastResponse) = harvestSetMembership_1_1($dbh,
+			-harvestAgent=>$ha,
+			-repository=>$repo,
+			-from=>$latestHarvest,
+		);
+		if( $lastError ) {
+			warn $lastError;
+			$dbh->addRepositoryError($repo,$lastURL,$lastError,$lastResponse);
+		}
+	}
+
+	if( my $oai_dc = $repo->getMetadataFormat( 'oai_dc' )) {
+		my $ftt = $oai_dc->getFulltext();
+		my $startTime = $dbh->now();
+		my $st = harvest_Fulltext( $dbh,
+			harvestAgent => $ha,
+			repository => $repo,
+			from => $ftt->lastHarvest
+		);
+		if( $st ) {
+			$ftt->lastHarvest( $startTime );
+		}
+	}
+
+	1;
+}
+
+sub harvest_ListRecords {
+	my( $dbh, %args ) = @_;
+	my( $ha, $repo, $mdf, $from, $set, $token ) = @args{qw(
+		harvestAgent
+		repository
+		metadataFormat
+		from
+		set
+		resumptionToken
+	)};
+
+	my $cb = sub {
+		return if $opt_dryrun;
+		my $rec = shift;
+		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
+		$mdf->addRecord( $rec );
+	};
+	my $lr = defined($token) ? 
+		$ha->ListRecords(
+			resumptionToken=>$token,
+			onRecord => $cb,
+		) :
+		$ha->ListRecords(
+			force=>1, # Force bad metadata prefixes
+			metadataPrefix=>$mdf->metadataPrefix,
+			from=>$from,
+			set=>$set,
+			onRecord => $cb,
+		);
+
+	if( $lr->is_error ) {
+		return(
+			($lr->request ? $lr->request->uri : 'Unknown URI!'),
+			"(" . $repo->identifier . "/". $mdf->metadataPrefix . ") Error requesting ListRecords: " . $lr->code . " (" . $lr->message . ")\n",
+			$lr->content
+		);
+	}
+
+	(undef,undef,undef);
+}
+
+sub harvest_GetRecord {
+	my( $dbh, %args ) = @_;
+	my( $ha, $repo, $mdf, $from, $set ) = @args{qw(
+		harvestAgent
+		repository
+		metadataFormat
+		from
+		set
+	)};
+
+	if( defined($opt_identifier) ) {
+		my $r = $ha->GetRecord(
+			identifier=>$opt_identifier,
+			metadataPrefix=>$mdf->metadataPrefix
+		);
+		if( $r->is_error ) {
+			return ($r->request->uri,
+			"(" . $repo->identifier . "/" . $mdf->metadataPrefix . ") Error requresting GetRecord: " . $r->code . " (" . $r->message . ")\n",
+				$r->content,
+			);
+		}
+		my $rec = $r->next || return (undef,undef,undef);
+		$mdf->addRecord($rec);
+
+		return (undef,undef,undef);
+	}
+	my $li = $ha->ListIdentifiers(from=>$from,set=>$set);
+
+	while( my $id = $li->next ) {
+		my $rec = $ha->GetRecord(
+			identifier=>$id->identifier,
+			metadataPrefix=>$mdf->metadataPrefix,
+		);
+		if( $rec->is_error ) {
+			my $error = "(" . $repo->identifier . "/" . $mdf->metadataPrefix . ") Error retrieving GetRecord for " . $id->identifier . ": " . $rec->code . " (" . $rec->message . ")";
+			warn($error);
+			$dbh->addError($mdf,$error,$rec->content);
+			next;
+		}
+		$rec = $rec->next || next;
+		if( $mdf->addRecord($rec) ) {
+#			print STDERR "(" . $repo->identifier . "/" . $mdf->metadataPrefix .") GetRecord: Added " . $rec->identifier . "\n";
+		}
+# Add a small delay so we don't overrun the repository
+		select(undef,undef,undef,0.25);
+	}
+
+	if( $li->is_error ) {
+		return(
+			$li->request->uri,
+			"(" . $repo->identifier . "/" . $mdf->metadataPrefix . ") Error requesting ListIdentifiers: " . $li->code . " (" . $li->message . ")\n",
+			$li->content
+		);
+	}
+
+	(undef,undef,undef);
+}
+
+sub harvestSetMembership_1_1 {
+	my ($dbh, %args) = @_;
+	my $ha = $args{-harvestAgent};
+	my $repo = $args{-repository};
+	my $from = $args{-from};
+
+	my $sth = $dbh->prepare("SELECT id,setSpec FROM Sets WHERE repository=?");
+	$sth->execute($repo->id);
+
+	my @mdfs = $dbh->listMetadataFormats($repo);
+
+	# For each Set in the repository
+	while( my ($setid,$setSpec) = $sth->fetchrow_array ) {
+# warn $repo->identifier . ": Requesting set $setSpec (" . ($from || 'all') . ")\n";
+		# Request a list of records in that set
+		my $li = $ha->ListIdentifiers(
+			from=>datestamp($from, $GRANULARITY == WITH_SECONDS),
+			set=>$setSpec
+		);
+		if( $li->is_error ) {
+			return(
+				$li->request->uri,
+				"(" . $repo->identifier . "/" . $setSpec . ") Error requesting ListIdentifiers: " . $li->code . " (" . $li->message . ")\n",
+				$li->content
+			);
+		}
+		# For each item in the set
+		while( my $header = $li->next ) {
+			if( $header->is_error ) {
+				return(
+					$header->request->uri,
+					"(" . $repo->identifier . "/" . $setSpec . ") Error requesting ListIdentifiers: " . $header->code . " (" . $header->message . ")\n",
+					$header->content
+				);
+			}
+			# For each metadata format ...
+			foreach my $mdf (@mdfs) {
+				my $id = $dbh->getId($mdf,$header->identifier) || next;
+				# ... and each item record
+				my $rec = $dbh->getRecord($mdf,$id);
+				if( addRecordSetSpec($rec,$setSpec) ) {
+					$mdf->updateRecord(
+						id=>$id,
+						record=>$rec
+					);
+				}
+			}
+		}
+	}
+	$sth->finish;
+	(undef,undef,undef);
+}
+
+sub harvest_Fulltext
+{
+	return unless $opt_fulltext;
+	my( $dbh, %args ) = @_;
+	my( $ha, $repo, $from ) = @args{qw( harvestAgent repository from )};
+
+	my $mdf = $repo->getMetadataFormat('oai_dc') or return;
+	my $ftt = $mdf->getFulltext();
+
+	my $sth;
+	if( $from ) {
+		warn "Updating full-text records since $from\n" if $opt_verbose;
+		$sth = $dbh->prepare("SELECT id FROM ".$mdf->table." WHERE datestamp>?");
+		$sth->execute($from) or die $!;
+	} else {
+		$sth = $dbh->prepare("SELECT id FROM ".$mdf->table);
+		$sth->execute or die $!;
+	}
+	my $st;
+	while( my ($id) = $sth->fetchrow_array ) {
+		$ftt->removeRecord( $id );
+		my $rec = $mdf->getRecord( $id );
+		next if $rec->header->is_deleted;
+		warn sprintf("Searching for full-text for %s\n", $rec->identifier) if $opt_verbose;
+		unless( $rec->metadata ) {
+			warn sprintf("%s doesn't contain any metadata\n", $rec->identifier);
+			next;
+		}
+
+		my $dc = HTTP::OAI::Metadata::OAI_DC->new();
+		$rec->metadata->set_handler(
+			HTTP::OAI::SAXHandler->new( # Required to supply Text
+				Handler => $dc
+		));
+		$rec->metadata->generate;
+		$rec->metadata( $dc );
+		$HTTP::OAI::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
+		my $ft = HTTP::OAI::FullText->new(
+			$ha,
+			server_type => $st,
+			record => $rec
+		);
+		unless( $st )
+		{
+			$st = $ft->server_type;
+			unless( $st ) {
+				warn "Can't harvest full-text from ".$repo->identifier.": type unknown\n";
+				last;
+			}
+		}
+
+		foreach my $fmt ($ft->formats)
+		{
+			my $ds = $rec->datestamp;
+			if( $fmt->date )
+			{
+				my $t = Date::Parse::str2time( $fmt->date );
+				$ds = strftime("%Y%m%d%H%M%S", gmtime($t));
+			}
+			$ds =~ s/\D//g;
+			my $url = $fmt->url;
+			my $ct = $fmt->mime_type;
+			my @types;
+			eval { @types = run_droid( "$fmt" ) };
+			if( $@ )
+			{
+				warn sprintf("There was a problem running droid for %s (%s): %s\n", $rec->identifier, $fmt, $@);
+				@types = ();
+			}
+			@types = ([undef,'Unknown']) unless @types;
+			foreach my $t (@types)
+			{
+				warn sprintf("Got format %s for %s\n", $t->[1], $url) if $opt_verbose;
+				$ftt->addFulltext({
+					record => $id,
+					datestamp => $ds,
+					url => $url,
+					mimetype => $ct,
+					puid => $t->[0],
+					format => $t->[1]
+				});
+			}
+		}
+	}
+	$sth->finish;
+	return $st;
+}
+
+# If the record already has the setSpec, return 0, otherwise add the setSpec and return 1
+sub addRecordSetSpec {
+	my ($rec, $setSpec) = @_;
+	for ($rec->header->setSpec) {
+		return 0 if $_ eq $setSpec;
+	}
+# print "Adding $setSpec to ", $rec->identifier, "\n";
+	$rec->header->setSpec($setSpec);
+	return 1;
+}
+
+sub datestamp {
+	my $ds = shift || return undef;
+	my $wt = shift;
+	$ds =~ s/\D//g;
+	my $r = '';
+	if( $ds =~ s/^(\d{4})(\d{2})(\d{2})// ) {
+		$r = "$1-$2-$3";
+	} else {
+		die "Cannot extract datestamp from $ds";
+	}
+	if( $wt and $ds =~ s/^(\d\d)(\d\d)(\d\d)$// ) {
+		$r .= "T$1:$2:$3Z";
+	}
+	return $r;
+}
+
+sub timestamp {
+	my $ts = shift || return undef;
+	if( $ts =~ /^(\d{4})\D?(\d{2})\D?(\d{2})\D?(\d{2})\D?(\d{2})\D?(\d{2})/ ) {
+		return "$1-$2-$3T$4:$5:$6Z";
+	} else {
+		die "Cannot extract timestamp from $ts";
+	}
+}
+
+sub run_droid {
+	my $fn = shift;
+	my $tmp = File::Temp->new( CLEANUP => 1 );
+	system("$JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn >/dev/null");
+	my $doc = XML::LibXML->new->parse_file("$tmp.xml");
+	unlink("$tmp.xml");
+	my @formats;
+	for($doc->findnodes("//FileFormatHit")) {
+		my $fmt = defined($_->getAttribute('FormatVersion')) ?
+			sprintf("%s (%s)",
+					$_->getAttribute('FormatName'),
+					$_->getAttribute('FormatVersion')
+				   ) :
+				$_->getAttribute('FormatName');
+
+		push @formats, [
+			$_->getAttribute('FormatPUID'),
+			$fmt,
+			];
+		#warn "FORMAT: $fn => ", join(',',map { $_ || '(null)' } @{$formats[$#formats]}), "\n";
+	}
+	return @formats;
+}
+

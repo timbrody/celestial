@@ -1,0 +1,53 @@
+#!/usr/bin/perl -w
+
+# See README.TXT for legal.
+
+use strict;
+
+use lib "/home/celestial/lib";
+my $CFG_FILE = "/home/celestial/etc/celestial.conf";
+
+use POSIX qw/:sys_wait_h strftime/;
+
+use vars qw(@ISA $VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG);
+
+$VERSION = '1.2.0';
+$DEBUG = 0;
+$HTTP_TIMEOUT = 300; # In seconds
+
+use Getopt::Long;
+
+use XML::DOM;
+use OAI2::Harvester;
+use Celestial::DBI;
+
+my $LIB_PATH = undef;
+my $FORK = 1;
+my $HELP = 0;
+
+exit(0) unless GetOptions('help|h' => \$HELP, 'cfg|c=s' => \$CFG_FILE, 'fork!' => \$FORK);
+
+if( $HELP ) {
+print <<EOF;
+Usage: $0 [--cfg=/etc/celestial.conf] [--nofork]
+Where:
+	-c, --cfg	Specify the config file to use (contains
+			database connection info)
+	--nofork	Do not fork child processes when
+			harvesting (mainly for debugging)
+
+EOF
+exit(0);
+}
+
+my $parser = new XML::DOM::Parser;
+my $cfg = $parser->parsefile($CFG_FILE) or die "Unable to read config file $CFG_FILE, quitting";
+
+my $dbh = Celestial::DBI->connect($cfg) or die "Unable to connect to database: $!";
+
+while (<>) {
+	chomp();
+	print $dbh->table_exists($_), "\n";
+}
+
+$dbh->disconnect;

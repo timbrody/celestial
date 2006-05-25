@@ -1,0 +1,18 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+use lib "../../lib";
+
+use DBI;
+
+our $dbh = DBI->connect("dbi:mysql:host=santos;database=iar","roar") or die $!;
+
+my $sth = $dbh->prepare("SELECT value FROM live WHERE field='oai'");
+$sth->execute;
+while(my( $url ) = $sth->fetchrow_array ) {
+	chomp($url);
+	print $url, "\n";
+}
+
+$dbh->disconnect;
