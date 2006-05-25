@@ -5,6 +5,8 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME              => 'Celestial',
     VERSION_FROM      => 'lib/Celestial.pm', # finds $VERSION
+		DISTNAME					=> 'OAI-PMH-Celestial',
+		EXE_FILES					=>	['bin/celestial', 'bin/celestial-report'],
     PREREQ_PM         => {
 			HTTP::OAI => 3.17,
 		}, # e.g., Module::Name => 1.1
