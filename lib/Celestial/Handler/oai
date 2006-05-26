@@ -1,0 +1,561 @@
+#!/usr/bin/perl -w
+
+use CGI;
+
+# See README.TXT for legal.
+
+use strict;
+
+use vars qw(%vars $source $parser $dbh $adminEmail $repositoryName $PARSER );
+
+use lib "/home/celestial/lib";
+my $CFG_FILE = "/home/celestial/etc/celestial.conf";
+
+use CGI qw/:standard -oldstyle_urls/;
+$CGI::USE_PARAM_SEMICOLONS = 0; # We really, really want ampersands
+use DBI;
+use URI::Escape qw/uri_escape_utf8 uri_unescape/;
+use HTML::Entities;
+use XML::LibXML;
+use Encode;
+
+use HTTP::OAI::Harvester;
+
+use Celestial::DBI;
+
+binmode(STDOUT,":utf8");
+
+%vars = CGI::Vars();
+
+# Connect to the database
+$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+
+$PARSER = XML::LibXML->new();
+
+$source = substr(url(-path=>1),length(url()));
+undef $source unless $source;
+
+my $st = time();
+
+use vars qw( $repo $mdf );
+
+undef $repo;
+if( $source ) {
+	$source =~ s/^\///;
+	$source = uri_unescape($source);
+	my $repoid = $dbh->getRepositoryId($source);
+	$repo = $dbh->getRepository($repoid) if defined($repoid);
+}
+
+if( !defined($repo) ) {
+	print header(
+			-status=>'404 Not Found',
+			-type=>'text/html; charset=utf-8',
+			-charset=>'utf8',
+		),
+		start_html(
+			-title=>'404 Not Found',
+			-encoding=>'utf-8',
+		),
+		h1("404 Not Found"),
+		h3("Celestial (OAIA)"),
+		$source ? p("The requested repository ($source) was not found, perhaps you are looking for one of the following?") : p("Celestial no longer supports aggregation of OAI repositories, you can harvest individual repositories from the following URLs:");
+	print "<table><tr><th>Identifier</th><th>baseURL</th></tr>";
+	foreach my $repo ( $dbh->listRepositories ) {
+		my $id = $repo->identifier;
+		print "<tr><td>", encode_entities($id), "</td>",
+			"<td><a href=\"", url(), "/", uri_escape_utf8($id), "?verb=Identify\">",
+			encode_entities(url() . "/" . uri_escape_utf8($id)), 
+			"</a></td></tr>";
+	}
+	print "</table>";
+	print end_html;
+	exit();
+}
+
+print header(
+	-type=>'text/xml',
+	-expires=>'now',
+	-charset=>'utf-8'
+	);
+
+my @errors = HTTP::OAI::Repository::validate_request(%vars);
+if( @errors ) {
+	my $r = new HTTP::OAI::Response(
+		requestURL=>CGI->new->self_url(),
+		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+	);
+	$r->errors(@errors);
+	print $r->toDOM->toString;
+	exit();
+}
+
+if( my $set = $vars{set} ) {
+	if( !$repo->listSetIds($set) ) {
+		my $r = new HTTP::OAI::Response(
+			requestURL=>CGI->new->self_url(),
+			xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+		);
+		$r->errors(new HTTP::OAI::Error(
+			code=>'noMatchingRecords',
+			message=>'The specified set ("'.$vars{set}.'") does not exist.',
+		));
+		print $r->toDOM->toString;
+		exit();
+	}
+}
+if( defined(my $mdp = $vars{metadataPrefix}) ) {
+	unless( defined( $mdf = $repo->getMetadataFormat($mdp) ) ) {
+		my $r = new HTTP::OAI::Response(
+			requestURL=>CGI->new->self_url(),
+			xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+		);
+		$r->errors(new HTTP::OAI::Error(code=>'cannotDisseminateFormat'));
+		print $r->toDOM->toString;
+		exit();
+	}
+}
+
+if( $vars{from} && $vars{from} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
+	$vars{from} = "$1T00:00:00Z";
+}
+if( $vars{until} && $vars{until} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
+	$vars{until} = "$1T23:59:59Z";
+}
+
+$vars{from} =~ s/\D//g if $vars{from};
+$vars{until} =~ s/\D//g if $vars{until};
+
+$adminEmail = $dbh->adminEmail;
+$repositoryName = $dbh->repositoryName;
+
+my $r = process_request();
+print $r->toDOM->toString;
+
+$dbh->disconnect;
+
+sub process_request {
+	if( $vars{verb} eq 'GetRecord' ) {
+		&GetRecord();
+	} elsif( $vars{verb} eq 'Identify' ) {
+		&Identify();
+	} elsif( $vars{verb} eq 'ListIdentifiers' ) {
+		&ListIdentifiers();
+	} elsif( $vars{verb} eq 'ListMetadataFormats' ) {
+		&ListMetadataFormats();
+	} elsif( $vars{verb} eq 'ListRecords' ) {
+		&ListRecords();
+	} elsif( $vars{verb} eq 'ListSets' ) {
+		&ListSets();
+	}
+}
+
+sub GetRecord {
+	my $r = new HTTP::OAI::GetRecord(
+			requestURL=>CGI->new->self_url(),
+			xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+	);
+
+	my $identifier = $vars{identifier};
+	my $id = $mdf->getRecordId( $identifier );
+	unless( defined($id) ) {
+		for($repo->listMetadataFormats) {
+			if( defined($_->getRecordId( $identifier ))) {
+				$r->errors(new HTTP::OAI::Error(code=>'cannotDisseminateFormat'));
+				return $r;
+			}
+		}
+		$r->errors(new HTTP::OAI::Error(code=>'idDoesNotExist'));
+		return $r;
+	}
+
+	$r->record( $mdf->getRecord( $id ));
+
+	return $r;
+}
+sub Identify {
+	my $r = new HTTP::OAI::Identify(
+		baseURL=>url(),
+		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl"
+	);
+	$r->deletedRecord('persistent');
+	$r->earliestDatestamp('0001-01-01');
+	$r->granularity('YYYY-MM-DDThh:mm:ssZ');
+	my $responseDate = $r->responseDate;
+
+	if( $source ) {
+		if( $repo->Identify and length($repo->Identify) > 0 ) {
+			$r->parse_string($repo->Identify);
+		} else {
+			undef $source;
+		}
+	}
+	if( !$source ) {
+		$r->adminEmail('mailto:' . $adminEmail);
+		$r->repositoryName($repositoryName);
+
+		my $sth = $dbh->prepare("SELECT distinct baseURL FROM Repositories ORDER BY baseURL");
+		$sth->execute;
+
+		my $dom = XML::LibXML->createDocument('1.0','UTF-8');
+		$dom->setDocumentElement(my $md = $dom->createElementNS('http://www.openarchives.org/OAI/2.0/friends/','friends'));
+		$md->setAttribute('xmlns:xsi','http://www.w3.org/2001/XMLSchema-instance');
+		$md->setAttribute('xsi:schemaLocation','http://www.openarchives.org/OAI/2.0/friends/ http://www.openarchives.org/OAI/2.0/friends.xsd');
+
+		while( my ($baseURL) = $sth->fetchrow_array ) {
+			$md->appendChild($dom->createElement('baseURL'))->appendText($baseURL);
+		}
+		$sth->finish;
+
+		$r->description(new HTTP::OAI::Metadata(dom=>$dom));
+	}
+
+	$r->responseDate($responseDate);
+	$r->requestURL(CGI->new->self_url());
+
+	$r->baseURL(url() . ($source ? '/'.$source : ''));
+
+	return $r;
+}
+sub ListIdentifiers {
+	my $r = new HTTP::OAI::ListIdentifiers(
+		requestURL=>CGI->new->self_url(),
+		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+	);
+
+	my ($rid,$from,$until,$set,$start,$mdp);
+	$rid = 0;
+	$from = $vars{from} || '';
+	$until = $vars{until} || '';
+	$set = $vars{set} || '';
+	$start = 0;
+	$mdp = $vars{metadataPrefix} || '';
+
+	if( exists($vars{resumptionToken}) ) {
+		my @args = decodeToken($vars{resumptionToken});
+		($start,$from,$until,$mdp,$set) = @args;
+		if( !$mdp or !defined($mdf = $repo->getMetadataFormat($mdp)) ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing"));
+		} elsif( length($start) > 10 ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Starting offset (\"$start\") too long"));
+		} elsif( $from && length($from) != 14 ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"From date (\"$from\") not 14 digits long"));
+		} elsif( $until && length($until) != 14 ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Until date (\"$until\") not 14 digits long"));
+		}
+	}
+
+#	my @rids = sort { $a <=> $b } repositoryIds($dbh, $source, $mdp);
+
+	my $SQL = "SELECT `id`,DATE_FORMAT(`datestamp`,'$Celestial::DBI::DATE_FORMAT'),`header` FROM " . $mdf->table . " ";
+	my @LOGIC = ();
+	my @VALUES = ();
+	my @ORDER = ();
+
+	# Manual join with repository table (coz MySQL table joins suck)
+#	push(@LOGIC, '(' . join(' OR ', map { 'repository=?' } @rids) . ')');
+#	push(@VALUES, @rids);
+	if( $from ) {
+		push(@LOGIC, " `cursor` >= CONCAT(?,LPAD(MOD(?,1000),3,'0')) ");
+		$from =~ s/\D//g;
+		push(@VALUES, $from, ($start < 0 ? 0 : $start));
+	}
+	if( $until ) {
+		push(@LOGIC, " `cursor` <= CONCAT(?,'999') ");
+		$until =~ s/\D//g;
+		push(@VALUES, $until);
+	}
+	if( $set ) {
+		my @setIds = $repo->listSetIds($set);
+		$SQL .= ", " . $repo->setmemberships_table . " AS sm ";
+		push(@LOGIC, " `id`=sm.`record` ");
+		push(@LOGIC, '(' . join(' OR ', map { 'sm.`set`=?' } @setIds ) . ')');
+		push(@VALUES, @setIds);
+	}
+	if( @LOGIC ) {
+		$SQL .= " WHERE " . join(' AND ', @LOGIC);
+	}
+	$SQL .= " ORDER BY `cursor` ASC LIMIT 501";
+#warn "Executing (" . join(',', @VALUES), "):\n$SQL\n";
+	my $sth = $dbh->prepare($SQL);
+	$sth->execute(@VALUES) or die "Error executing $SQL: $!";
+
+	my ($UID,$datestamp,$header);
+	$sth->bind_columns(\$UID,\$datestamp,\$header);
+	my $c = 0;
+
+	my @UIDS;
+
+	while( $sth->fetch ) {
+		if( ++$c == 501 ) {
+			$r->resumptionToken(new HTTP::OAI::ResumptionToken(resumptionToken=>encodeToken($UID,$datestamp,$until,$mdp,$set)));
+			last;
+		}
+
+		$r->identifier(new HTTP::OAI::Header(dom=>$PARSER->parse_string($header)));
+	}
+
+	$sth->finish;
+
+	if( !$r->identifier ) {
+		if( exists($vars{resumptionToken}) ) {
+			$r->errors(new HTTP::OAI::Error(
+				code=>'badResumptionToken',
+				message=>'No records match the resumption token',
+			));
+			$r->errors(new HTTP::OAI::Error(
+				code=>'noRecordsMatch',
+				message=>'No records match the resumption token',
+			));
+		} else {
+			$r->errors(new HTTP::OAI::Error(
+				code=>'noRecordsMatch'
+			));
+		}
+	} elsif( !$r->resumptionToken && exists($vars{resumptionToken}) ) {
+		$r->resumptionToken(new HTTP::OAI::ResumptionToken);
+	}
+
+	return $r;
+}
+sub ListMetadataFormats {
+	my $r = new HTTP::OAI::ListMetadataFormats(
+		requestURL=>CGI->new->self_url(),
+		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+	);
+
+	my $identifier = $vars{identifier};
+	my @mdfs = $dbh->listMetadataFormats($repo);
+
+	if( defined($identifier) ) {
+		@mdfs = grep { defined($_->getRecordId( $identifier )) } @mdfs;
+	}
+
+	for (@mdfs) {
+		$r->metadataFormat(
+			HTTP::OAI::MetadataFormat->new(
+				metadataPrefix=>$_->metadataPrefix,
+				schema=>$_->schema,
+				metadataNamespace=>$_->metadataNamespace
+		));
+	}
+
+	if( !$r->metadataFormat ) {
+		if( @mdfs ) {
+			$r->errors(new HTTP::OAI::Error(code=>'noMetadataFormats'));
+		} else {
+			$r->errors(new HTTP::OAI::Error(code=>'idDoesNotExist'));
+		}
+	}
+
+	return $r;
+}
+sub ListRecords {
+	my $r = new HTTP::OAI::ListRecords(
+		requestURL=>CGI->new->self_url(),
+		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+	);
+
+	my ($rid,$from,$until,$set,$start,$mdp);
+	$rid = 0;
+	$from = $vars{'from'} || '';
+	$until = $vars{'until'} || '';
+	$set = $vars{'set'} || '';
+	$start = 0;
+	$mdp = $vars{metadataPrefix};
+
+	if( exists($vars{resumptionToken}) ) {
+		my @args = decodeToken($vars{resumptionToken});
+		($start,$from,$until,$mdp,$set) = @args;
+		if( !$mdp or !defined($mdf = $repo->getMetadataFormat( $mdp )) ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing"));
+		} elsif( length($start) > 10 ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Starting offset (\"$start\") too long"));
+		} elsif( $from && length($from) != 14 ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"From date (\"$from\") not 14 digits long"));
+		} elsif( $until && length($until) != 14 ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Until date (\"$until\") not 14 digits long"));
+		}
+	}
+
+#	my @rids = sort { $a <=> $b } repositoryIds($dbh, $source, $mdp);
+
+	my $SQL = "SELECT `id`,DATE_FORMAT(`datestamp`,'$Celestial::DBI::DATE_FORMAT'),`header`,`metadata`,`about` FROM " . $mdf->table . " ";
+	my @LOGIC = ();
+	my @VALUES = ();
+	my @ORDER = ();
+
+	# Manual join with repository table (coz MySQL table joins suck)
+#	push(@LOGIC, '(' . join(' OR ', map { 'repository=?' } @rids) . ')');
+#	push(@VALUES, @rids);
+	if( $from ) {
+		push(@LOGIC, " `cursor` >= CONCAT(?,LPAD(MOD(?,1000),3,'0')) ");
+		push(@VALUES, $from, ($start < 0 ? 0 : $start));
+	}
+	if( $until ) {
+		push(@LOGIC, " `cursor` <= CONCAT(?,'999') ");
+		push(@VALUES, $until);
+	}
+	if( $set && (my @setIds = $repo->listSetIds($set)) ) {
+		$SQL .= ", " . $repo->setmemberships_table . " AS sm ";
+		push(@LOGIC, " `id`=`record` ");
+		push(@LOGIC, '(' . join(' OR ', map { 'sm.`set`=?' } @setIds ) . ')');
+		push(@VALUES, @setIds);
+	} elsif( $set ) {
+		$set = encode_entities($set);
+		$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"A set was in the resumption token ('$set'), but doesn't exist"));
+		return $r;
+	}
+	if( @LOGIC ) {
+		$SQL .= " WHERE " . join(' AND ', @LOGIC);
+	}
+	$SQL .= " ORDER BY `cursor` ASC LIMIT 101";
+#warn "Executing (" . join(',', @VALUES), "):\n$SQL\n";
+	my $sth = $dbh->prepare($SQL) or die $!;
+	$sth->execute(@VALUES) or die "Error executing $SQL: $!";
+
+	my ($UID,$datestamp,$header,$metadata,$about);
+	$sth->bind_columns(\$UID,\$datestamp,\$header,\$metadata,\$about);
+	my $c = 0;
+
+	while( $sth->fetch ) {
+		if( ++$c == 101 ) {
+			$r->resumptionToken(new HTTP::OAI::ResumptionToken(resumptionToken=>encodeToken($UID,$datestamp,$until,$mdp,$set)));
+			last;
+		}
+
+		$r->record(my $record = new HTTP::OAI::Record(
+			version=>2.0,
+			header=>HTTP::OAI::Header->new(dom=>$PARSER->parse_string($header))
+		));
+		eval {
+			if( $metadata ) {
+				my $dom = getMetadataContent($PARSER->parse_string($metadata));
+				$record->metadata(HTTP::OAI::Metadata->new(dom=>$dom)) if $dom;
+			}
+		};
+		warn $@ if $@;
+		if( $about ) {
+			my $dom = $PARSER->parse_string($about);
+			for($dom->getDocumentElement->getChildNodes) {
+				my $dom = XML::LibXML->createDocument('1.0','UTF-8');
+				my $node = $_->cloneNode(1);
+				$dom->adoptNode($node);
+				$dom->setDocumentElement($node);
+				$record->about(HTTP::OAI::Metadata->new(dom=>$dom));
+			}
+		}
+	}
+
+	$sth->finish;
+
+	if( !$r->record ) {
+		if( exists($vars{resumptionToken}) ) {
+			$r->errors(new HTTP::OAI::Error(
+				code=>'badResumptionToken',
+				message=>'No records match the resumption token',
+			));
+			$r->errors(new HTTP::OAI::Error(
+				code=>'noRecordsMatch',
+				message=>'No records match the resumption token',
+			));
+		} else {
+			$r->errors(new HTTP::OAI::Error(
+				code=>'noRecordsMatch'
+			));
+		}
+	} elsif( !$r->resumptionToken && exists($vars{resumptionToken}) ) {
+		$r->resumptionToken(new HTTP::OAI::ResumptionToken);
+	}
+
+	return $r;
+}
+sub ListSets {
+	my $r = new HTTP::OAI::ListSets(
+		requestURL=>CGI->new->self_url(),
+		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
+	);
+
+	my $sth = $dbh->prepare("SELECT `id`,`setSpec`,`setName` FROM ".$repo->sets_table." ORDER BY `id`");
+	$sth->execute() or die $!;
+
+	my ($id,$setSpec,$setName);
+	$sth->bind_columns(\$id,\$setSpec,\$setName);
+	utf8::decode($setSpec);
+	utf8::decode($setName);
+	while( $sth->fetch ) {
+		$r->set(HTTP::OAI::Set->new(
+			setSpec=>$setSpec,
+			setName=>$setName
+		));
+	}
+	$sth->finish;
+
+	if( !$r->set ) {
+		$r->errors(new HTTP::OAI::Error(code=>'noSetHierarchy'));
+	}
+
+	return $r;
+}
+
+sub listMetadataFormats {
+	my $dbh = shift;
+	my %args = @_;
+	my ($identifier, $source) = ($args{-identifier},$args{-source});
+
+	my ($SQL, @LOGIC, @VALUES);
+
+	$SQL = "SELECT metadataPrefix,schema,metadataNamespace FROM MetadataFormats as mf ";
+	if( $identifier ) {
+		$SQL .= " INNER JOIN Metadata as m ON mf.id=m.repository ";
+		push(@LOGIC, "m.identifier = ?");
+		push(@VALUES, $identifier);
+	}
+	if( $source ) {
+		$SQL .= " INNER JOIN Repositories as r ON mf.repository=r.id ";
+		push(@LOGIC, "r.identifier = ?");
+		push(@VALUES, $source);
+	}
+
+	$SQL .= " WHERE " . join(' AND ', @LOGIC) if @LOGIC;
+	$SQL .= " GROUP BY metadataPrefix";
+
+	my $sth = $dbh->prepare($SQL);
+	$sth->execute(@VALUES);
+
+	my %mdps;
+	while( my ($mdp,$schema,$mdns) = $sth->fetchrow_array ) {
+		my $mdf = new HTTP::OAI::MetadataFormat;
+		$mdf->metadataPrefix($mdp);
+		$mdf->schema($schema);
+		$mdf->metadataNamespace($mdns);
+		$mdps{$mdp} = $mdf;
+	}
+	$sth->finish;
+
+	%mdps;
+}
+
+sub datestamp {
+	my $ds = shift;
+	$ds =~ s/(\d{4})(\d{2})(\d{2})/$1-$2-$3/;
+	return $ds;
+}
+
+sub encodeToken {
+	return join '!', map { uri_escape_utf8(($_||''),"^A-Za-z0-9") } @_;
+}
+
+sub decodeToken {
+	return map { uri_unescape($_) } split /!/, $_[0];
+}
+
+sub getMetadataContent {
+	my $dom = shift;
+	foreach my $node ($dom->documentElement->childNodes) {
+		next if $node->nodeType == XML_TEXT_NODE;
+		$dom->setDocumentElement($node);
+		return $dom;
+	}
+	return undef;
+}
