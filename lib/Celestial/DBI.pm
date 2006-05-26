@@ -833,6 +833,18 @@ sub listIdsByIdentifier {
 	return @matches;
 }
 
+sub getDomContent {
+	my( $self, $dom ) = @_;
+	my @docs;
+	foreach my $node ($dom->documentElement->getChildNodes) {
+		next unless $node->nodeType == XML_ELEMENT_NODE;
+		my $doc = XML::LibXML->createDocument( '1.0', 'UTF-8' );
+		$doc->setDocumentElement($node);
+		push @docs, $doc;
+	}
+	return @docs;
+}
+
 sub getRecord {
 	my ($self, $mdf, $id, %opts) = @_;
 	my $parser = $self->parser;
@@ -844,14 +856,12 @@ sub getRecord {
 	my $rec = new HTTP::OAI::Record(version=>2.0, %opts);
 	$rec->header(new HTTP::OAI::Header(dom=>$parser->parse_string($$ary[0])));
 	if( $$ary[1] ) {
-		$rec->metadata(new HTTP::OAI::Metadata(dom=>$parser->parse_string($$ary[1])));
+		my ($dom) = $self->getDomContent($parser->parse_string($$ary[1]));
+		$rec->metadata(new HTTP::OAI::Metadata(dom=>$dom)) if $dom;
 	}
 	if( $$ary[2] ) {
-		my $dom_a = $parser->parse_string($$ary[2]);
-		for($dom_a->getChildNodes) {
-			my $dom = XML::LibXML->createDocument('1.0','UTF-8');
-			$dom->setDocumentElement($_);
-			$rec->about(new HTTP::OAI::Metadata(dom=>$dom));
+		for($self->getDomContent($parser->parse_string($$ary[2]))) {
+			$rec->about(new HTTP::OAI::Metadata(dom=>$_));
 		}
 	}
 	$sth->finish;

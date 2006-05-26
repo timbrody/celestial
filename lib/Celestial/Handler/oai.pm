@@ -10,8 +10,6 @@ use vars qw( @ISA );
 
 push @ORDER, 'oai';
 
-use vars qw( $PARSER );
-
 #use CGI qw/:standard -oldstyle_urls/;
 #$CGI::USE_PARAM_SEMICOLONS = 0; # We really, really want ampersands
 use URI::Escape qw/uri_escape_utf8 uri_unescape/;
@@ -21,8 +19,6 @@ use Encode;
 
 use HTTP::OAI;
 use HTTP::OAI::Harvester;
-
-$PARSER = XML::LibXML->new();
 
 sub page
 {
@@ -100,7 +96,7 @@ sub page
 	}
 
 	$CGI->content_type( 'text/xml; charset=utf-8' );
-	print $r->toDOM->toString(1);
+	$r->toDOM()->toFH(\*STDOUT,1);
 
 	return undef;
 }
@@ -245,13 +241,16 @@ sub ListIdentifiers {
 
 	my @UIDS;
 
+	my $parser = XML::LibXML->new;
 	while( $sth->fetch ) {
 		if( ++$c == 501 ) {
 			$r->resumptionToken(new HTTP::OAI::ResumptionToken(resumptionToken=>encodeToken($UID,$datestamp,$until,$mdp,$set)));
 			last;
 		}
 
-		$r->identifier(new HTTP::OAI::Header(dom=>$PARSER->parse_string($header)));
+		utf8::decode($header);
+
+		$r->identifier(new HTTP::OAI::Header(dom=>$parser->parse_string($header)));
 	}
 
 	$sth->finish;
@@ -383,31 +382,31 @@ sub ListRecords {
 	$sth->bind_columns(\$UID,\$datestamp,\$header,\$metadata,\$about);
 	my $c = 0;
 
+	my $parser = XML::LibXML->new;
 	while( $sth->fetch ) {
 		if( ++$c == 101 ) {
 			$r->resumptionToken(new HTTP::OAI::ResumptionToken(resumptionToken=>encodeToken($UID,$datestamp,$until,$mdp,$set)));
 			last;
 		}
 
+		utf8::decode($header);
+		utf8::decode($metadata);
+		utf8::decode($about);
+
 		$r->record(my $record = new HTTP::OAI::Record(
 			version=>2.0,
-			header=>HTTP::OAI::Header->new(dom=>$PARSER->parse_string($header))
+			header=>HTTP::OAI::Header->new(dom=>$parser->parse_string($header))
 		));
 		eval {
 			if( $metadata ) {
-				my $dom = getMetadataContent($PARSER->parse_string($metadata));
+				my ($dom) = $dbh->getDomContent($parser->parse_string($metadata));
 				$record->metadata(HTTP::OAI::Metadata->new(dom=>$dom)) if $dom;
 			}
 		};
 		warn $@ if $@;
 		if( $about ) {
-			my $dom = $PARSER->parse_string($about);
-			for($dom->getDocumentElement->getChildNodes) {
-				my $dom = XML::LibXML->createDocument('1.0','UTF-8');
-				my $node = $_->cloneNode(1);
-				$dom->adoptNode($node);
-				$dom->setDocumentElement($node);
-				$record->about(HTTP::OAI::Metadata->new(dom=>$dom));
+			for($dbh->getDomContent($parser->parse_string($about))) {
+				$record->about(HTTP::OAI::Metadata->new(dom=>$_));
 			}
 		}
 	}
@@ -476,16 +475,6 @@ sub encodeToken {
 
 sub decodeToken {
 	return map { uri_unescape($_) } split /!/, $_[0];
-}
-
-sub getMetadataContent {
-	my $dom = shift;
-	foreach my $node ($dom->documentElement->childNodes) {
-		next if $node->nodeType == XML_TEXT_NODE;
-		$dom->setDocumentElement($node);
-		return $dom;
-	}
-	return undef;
 }
 
 1;
