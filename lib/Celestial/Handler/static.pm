@@ -21,7 +21,7 @@ sub page
 		return;
 	}
 	
-	my $css_file = $SETTINGS->{ paths }->{ html } . $file;
+	my $css_file = $SETTINGS->{ paths }->{ html } . '/' . $file;
 	
 	unless( -e $css_file ) {
 		$CGI->not_found;

@@ -65,9 +65,12 @@ sub handler
 		my $url = URI->new(CGI::self_url());
 			$url->query(undef);
 			$url = $url->path;
-		my $script_path = URI->new(CGI::url())->path;
+		my $script_path = $SETTINGS->{ paths }->{ script };
+		die "Script path undefined in the configuration"
+			unless defined $script_path;
+# || URI->new(CGI::url())->path;
 		my $section = substr($url,length($script_path));
-		$section = $section =~ /^\/([^\/]+)/ ? $1 : '';
+		$section = $section =~ /^\/?([^\/]+)/ ? $1 : '';
 		my $section_path = length($section) > 0 ?
 			substr($url,length($script_path)+length($section)+1) :
 			substr($url,length($script_path));
@@ -189,7 +192,7 @@ sub form_action {
 sub as_link {
 	my( $self, @args ) = @_;
 	my $section = @args % 2 == 1 ? shift @args : $self->section;
-	my $url = URI->new( $self->base_url->path . '/' . $section, 'http' );
+	my $url = URI->new( $self->script_path . '/' . $section, 'http' );
 	$url->query_form( @args );
 	return $url;
 }
