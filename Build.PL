@@ -50,7 +50,8 @@ my $build = $class->new(
 	module_name => 'Celestial',
 	license => 'perl',
 	requires => {
-		'HTTP::OAI::Harvester' => '3.17'
+		'HTTP::OAI::Harvester' => '3.17',
+		'URI::Find' => 0.1,
 	},
 	install_path => {
 		conf => '/etc/celestial',

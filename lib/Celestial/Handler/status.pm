@@ -1,15 +1,17 @@
 package Celestial::Handler::status;
 
+use strict;
+use warnings;
+
 use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
 
-sub init {
-	push @Handler::ORDER, 'status';
-	push @Handler::NAVBAR, 'status';
-	# We'll claim the default
-	$Handler::DEFAULT = 'status';
-}
+# We'll claim the default
+push @ORDER, 'status';
+$DEFAULT = 'status';
+
+sub navbar { 1 }
 
 sub title {
 	my( $self, $CGI ) = @_;
@@ -40,6 +42,7 @@ sub body {
 		$c++;
 		my @mdfs = $repo->listMetadataFormats;
 		my $edit_url = $CGI->as_link('repository',repository=>$repo->id);
+		my $row;
 		foreach my $mdf (@mdfs) {
 			my $ds = $mdf->lastHarvest ?
 				$CGI->datestamp($mdf->lastHarvest) :

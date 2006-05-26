@@ -16,6 +16,7 @@ use XML::LibXML;
 use Celestial::DBI;
 
 use Apache2;
+use APR::Table;
 use Apache::Access;
 use Apache::Connection;
 use Apache::Const qw( OK );
@@ -33,6 +34,7 @@ use Apache::Const qw( OK );
 #};
 
 use Celestial::Handler;
+use Celestial::Handler::static;
 use Celestial::Handler::login;
 use Celestial::Handler::logout;
 use Celestial::Handler::status;
@@ -46,25 +48,34 @@ sub handler
 
 	binmode(STDOUT,":utf8");
 
-	$r->status( OK );
-	$r->content_type( "text/html; charset: utf-8" );
-
 ###########################################################
 
 	my $dbh = Celestial::DBI->connect()
 		or die("Unable to connect to database: $!");
 	my $dom = XML::LibXML::Document->new('1.0','UTF-8');
 
+	$Handler::dom = $dom; # for dataElement
+
 ###########################################################
 
 	my $cgi;
 	{
-		my $section = URI->new(CGI::self_url())->path;
-		$section = $section =~ /\/(\w+)\/?$/ ? $1 : '';
+		my $url = URI->new(CGI::self_url());
+			$url->query(undef);
+			$url = $url->path;
+		my $script_path = URI->new(CGI::url())->path;
+		my $section = substr($url,length($script_path));
+		$section = $section =~ /^\/([^\/]+)/ ? $1 : '';
+		my $section_path = length($section) > 0 ?
+			substr($url,length($script_path)+length($section)+1) :
+			substr($url,length($script_path));
+#warn "url = $url, script = $script_path, section = $section, path = $section_path";
 
 		my $action = CGI::param('action') || '';
+		my $referer = $r->headers_in->{ 'Referer' };
 
 		$cgi = Celestial::CGI->new(
+				status => OK,
 				request => $r,
 				section => $section,
 				action => $action,
@@ -73,10 +84,11 @@ sub handler
 				base_url => URI->new(CGI::url()),
 				form_action => URI->new(CGI::url()),
 				url => URI->new(CGI::self_url()),
-				script_path => URI->new(CGI::url())->path,
+				script_path => $script_path,
+				section_path => $section_path,
 				hostname => $r->hostname,
 				remote_ip => $r->connection->remote_ip,
-				referer => $r->headers_in->{ 'Referer' },
+				referer => $referer,
 				auth => undef,
 				);
 	}
@@ -91,40 +103,18 @@ sub handler
 
 ###########################################################
 
-# Set up the Handler::ORDER and Handler::DEFAULT
-	@Handler::NAVBAR = @Handler::ORDER = ();
-	for(qw( login logout status import settings repository )) {
-		my $h = "Celestial::Handler::".$_;
-		$h->init( $cgi );
-	}
+	# Set up the Handler::ORDER and Handler::DEFAULT
+#	@Handler::NAVBAR = @Handler::ORDER = ();
+#	for(qw( login logout status import settings repository )) {
+#		my $h = "Celestial::Handler::".$_;
+#		$h->init( $cgi );
+#	}
 
 ###########################################################
 
-	$dom->createInternalSubset( "html", "-//W3C//DTD XHTML 1.0 Strict//EN", "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd" );
-
-	$Handler::dom = $dom; # for dataElement
-
-	$dom->setDocumentElement(my $doc = $dom->createElement('html'));
-
-	$doc->appendChild(my $head = $dom->createElement('head'));
-	$doc->appendChild(my $body = $dom->createElement('body'));
-
-	$head->appendChild(dataElement( 'style', "\@import url(/generic.css);", { type => 'text/css', media => 'screen' }));
-
-# Window title
-	my $wtitle = $head->appendChild(dataElement( 'title', 'Celestial - ' ))->getFirstChild;
-
-# Body title
-	my $ptitle = $body->appendChild(dataElement( 'h1', 'Celestial - '))->getFirstChild;
-
-# Top navigation bar
-	$body->appendChild(my $topbar = dataElement( 'div', undef, {class=>'topbar'} ));
-	$topbar->appendChild(my $navbar = dataElement( 'ul', undef, {class=>'navbar'} ));
-
-	my $section = $Handler::DEFAULT;
-
-# Find the handler
-	for(@Handler::ORDER)
+	# Get a handler
+	my $section = $DEFAULT;
+	for(@ORDER)
 	{
 		if( $_ eq $cgi->section )
 		{
@@ -132,30 +122,24 @@ sub handler
 			last;
 		}
 	}
-
 	$cgi->section( $section );
 
 	my $h = "Celestial::Handler::$section";
 	$h = $h->new( $dbh, $dom );
 
-	for(@Handler::NAVBAR) {
-		my $link = dataElement( 'a', $cgi->msg( "navbar.$_", $cgi->user ), { href=>$cgi->as_link( $_ ), class=>'navbar' });
-		my $li = dataElement( 'li', $link, {class=>$_ eq $section ? 'navbar hilite' : 'navbar'} );
-		$navbar->appendChild( $li ) if defined($li);
+	my $page;
+	if( defined($page = $h->page( $cgi ))) {
+		$dom->setDocumentElement( $page );
 	}
-
-	$wtitle->appendData( $h->title($cgi) );
-	$ptitle->appendData( $h->title($cgi) );
-
-	$body->appendChild( $h->body($cgi) );
 
 	$dbh->disconnect;
 
-	if( $r->status == OK ) {
+	if( $page ) {
+		$r->content_type( "text/html; charset: utf-8" );
 		$dom->toFH(\*STDOUT,1);
 	}
 
-	return $r->status;
+	return $cgi->status;
 }
 
 package Celestial::CGI;
@@ -164,7 +148,7 @@ use Celestial::Config; # Exports $SETTINGS
 
 use YAML;
 use vars qw( $AUTOLOAD );
-use Apache::Const qw( REDIRECT );
+use Apache::Const qw( REDIRECT NOT_FOUND );
 
 sub new {
 	my( $class, %opts ) = @_;
@@ -237,7 +221,18 @@ sub redirect {
 	my $self = shift;
 	my $r = $self->request;
 	$r->err_headers_out->add( 'Location' => shift );
-	$r->status( REDIRECT );
+	$self->status( REDIRECT );
+}
+
+sub not_found {
+	my $self = shift;
+	my $r = $self->request;
+	$self->status( NOT_FOUND );
+}
+
+sub content_type {
+	my $self = shift;
+	$self->request->content_type( shift );
 }
 
 package Celestial::Auth;

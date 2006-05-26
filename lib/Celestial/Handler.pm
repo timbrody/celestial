@@ -1,16 +1,17 @@
 package Celestial::Handler;
 
-use vars qw( @ISA @EXPORT @EXPORT_OK );
+use strict;
+use warnings;
+
+use Carp;
 
 use vars qw( @ORDER @NAVBAR $DEFAULT $dbh $dom );
 
+use vars qw( @ISA @EXPORT @EXPORT_OK );
 use Exporter;
 @ISA = qw(Exporter);
-@EXPORT = qw( &dataElement &abbr_url &formElement &tableRowElement &urlElement );
-@EXPORT_OK = qw( &dataElement &abbr_url &formElement &tableRowElement &urlElement );
-
-@NAVBAR = @ORDER = qw();
-$DEFAULT = undef;
+@EXPORT = qw( @ORDER $DEFAULT &dataElement &abbr_url &formElement &tableRowElement &urlElement );
+@EXPORT_OK = qw( @ORDER $DEFAULT &dataElement &abbr_url &formElement &tableRowElement &urlElement );
 
 sub new {
 	my $class = shift;
@@ -25,8 +26,59 @@ sub new {
 sub dbh { shift->{dbh} }
 sub dom { shift->{dom} }
 
+sub page {
+	my( $self, $CGI ) = @_;
+
+	$dom->createInternalSubset( "html", "-//W3C//DTD XHTML 1.0 Strict//EN", "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd" );
+
+	$dom->setDocumentElement(my $doc = $dom->createElement('html'));
+
+	$doc->appendChild(my $head = $dom->createElement('head'));
+	$doc->appendChild(my $body = $dom->createElement('body'));
+
+	$head->appendChild(dataElement( 'style', "\@import url('".$CGI->as_link('static/generic.css')."');", { type => 'text/css', media => 'screen' }));
+
+	# Window title
+	my $wtitle = $head->appendChild(dataElement( 'title', 'Celestial - ' ))->getFirstChild;
+
+	# Body title
+	my $ptitle = $body->appendChild(dataElement( 'h1', 'Celestial - '))->getFirstChild;
+
+	# Top navigation bar
+	$body->appendChild(my $topbar = dataElement( 'div', undef, {class=>'topbar'} ));
+	$topbar->appendChild(my $navbar = dataElement( 'ul', undef, {class=>'navbar'} ));
+
+	for (@ORDER) {
+		my $c = "Celestial::Handler::$_";
+		next unless $c->navbar($CGI);
+		my $link = dataElement( 'a', $CGI->msg( "navbar.$_", $CGI->user ), { href=>$CGI->as_link( $_ ), class=>'navbar' });
+		my $li = dataElement( 'li', $link, {class=>$_ eq $CGI->section ? 'navbar hilite' : 'navbar'} );
+		$navbar->appendChild( $li ) if defined($li);
+	}
+
+	$wtitle->appendData( $self->title($CGI) );
+	$ptitle->appendData( $self->title($CGI) );
+
+	$body->appendChild( $self->body($CGI) );
+
+	return $doc;
+}
+
+sub title {
+	shift->msg( 'error.404' );
+}
+
+sub body {
+	my( $self, $CGI ) = @_;
+
+	return dataElement( 'div' );
+}
+
+sub navbar { 0 }
+
 sub dataElement {
 	my( $name, $value, $attr ) = @_;
+	Carp::confess( "dom not defined" ) unless $dom;
 	$attr ||= {};
 	my $node = $dom->createElement($name);
 	if( defined($value) ) {
@@ -93,7 +145,7 @@ sub formElement
 		my $name = $field->{ name };
 		$field->{ type } ||= 'text';
 		$field->{ size } ||= 50;
-		my $label = delete($field{ label }) || $CGI->msg( 'input.'.$name );
+		my $label = delete($field->{ label }) || $CGI->msg( 'input.'.$name );
 		$table->appendChild(my $tr = dataElement('tr',undef,{class=>'input'}));
 		$tr->appendChild(my $td = dataElement('td',undef,{class=>'input'}));
 		$td->appendChild(dataElement('label',$label,{'for'=>$name}));
@@ -125,18 +177,6 @@ sub no_auth {
 	my( $self, $CGI ) = @_;
 
 	return $self->error( $CGI, $CGI->msg( 'error.no_auth' ));
-}
-
-sub navbar {
-	undef;
-}
-
-sub title {
-	'';
-}
-
-sub body {
-	undef;
 }
 
 1;

@@ -1,15 +1,17 @@
 package Celestial::Handler::settings;
 
+use strict;
+use warnings;
+
 use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
 
-sub init {
+push @ORDER, 'settings';
+
+sub navbar {
 	my( $class, $CGI ) = @_;
-	push @Handler::ORDER, 'settings';
-	if( $CGI->authorised ) {
-		push @Handler::NAVBAR, 'settings';
-	}
+	return $CGI->authorised;
 }
 
 sub title {

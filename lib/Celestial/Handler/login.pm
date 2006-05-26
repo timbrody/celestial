@@ -1,15 +1,26 @@
 package Celestial::Handler::login;
 
+use strict;
+use warnings;
+
 use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
 
-sub init {
+push @ORDER, 'login';
+
+sub navbar {
 	my( $class, $CGI ) = @_;
-	push @Handler::ORDER, 'login';
-	unless( $CGI->authorised ) {
-		push @Handler::NAVBAR, 'login';
+	return !$CGI->authorised;
+}
+
+sub page {
+	my( $self, $CGI ) = @_;
+	if( $CGI->referer ) {
+		$CGI->redirect( $CGI->referer );
+		return;
 	}
+	return $self->SUPER::page( $CGI );
 }
 
 sub title {
@@ -30,8 +41,6 @@ sub body {
 		$body->appendChild(my $p = dataElement( 'p', "Redirecting you back to " ));
 		$p->appendChild( dataElement( 'tt', dataElement( 'a', $CGI->referer, {href=>$CGI->referer} )));
 	}
-
-	$CGI->redirect($CGI->referer);
 
 	return $body;
 }

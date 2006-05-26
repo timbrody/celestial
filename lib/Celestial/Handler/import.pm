@@ -7,6 +7,8 @@ use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
 
+push @ORDER, 'import';
+
 use URI;
 require URI::Find;
 use HTTP::OAI;
@@ -21,12 +23,9 @@ use constant {
 
 use vars qw( @FOUND_URLS );
 
-sub init {
+sub navbar {
 	my( $class, $CGI ) = @_;
-	push @Handler::ORDER, 'import';
-	if( $CGI->authorised ) {
-		push @Handler::NAVBAR, 'import';
-	}
+	return $CGI->authorised;
 }
 
 sub title {

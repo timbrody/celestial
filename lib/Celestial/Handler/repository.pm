@@ -7,10 +7,7 @@ use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
 
-sub init {
-	push @Handler::ORDER, 'repository';
-	# push @Handler::NAVBAR, 'repository';
-}
+push @ORDER, 'repository';
 
 sub title {
 	my( $self, $CGI ) = @_;
