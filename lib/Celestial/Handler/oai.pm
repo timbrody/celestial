@@ -195,6 +195,7 @@ sub ListIdentifiers {
 		} elsif( $until && length($until) != 14 ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Until date (\"$until\") not 14 digits long"));
 		}
+		return $r if $r->errors;
 	}
 
 #	my @rids = sort { $a <=> $b } repositoryIds($dbh, $source, $mdp);
@@ -330,6 +331,7 @@ sub ListRecords {
 		} elsif( $until && length($until) != 14 ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Until date (\"$until\") not 14 digits long"));
 		}
+		return $r if $r->errors;
 	}
 
 #	my @rids = sort { $a <=> $b } repositoryIds($dbh, $source, $mdp);

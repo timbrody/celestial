@@ -39,8 +39,6 @@ Be more verbose.
 use strict;
 use warnings;
 
-our $CFG_FILE = "/home/eprints/celestial/etc/celestial.conf";
-
 use POSIX qw/:sys_wait_h strftime/;
 
 use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $MAILHOST);
@@ -85,9 +83,8 @@ if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 }
 
 $DEBUG = $opt_verbose;
-$CFG_FILE = $opt_cfg if $opt_cfg;
 
-my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 
 my $sth = $dbh->prepare("SELECT type,value FROM Configuration");
 $sth->execute;
