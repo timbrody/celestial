@@ -1,160 +1,113 @@
-#!/usr/bin/perl -w
-
-use CGI;
-
-# See README.TXT for legal.
+package Celestial::Handler::oai;
 
 use strict;
+use warnings;
 
-use vars qw(%vars $source $parser $dbh $adminEmail $repositoryName $PARSER );
+use Celestial::Handler;
 
-use lib "/home/celestial/lib";
-my $CFG_FILE = "/home/celestial/etc/celestial.conf";
+use vars qw( @ISA );
+@ISA = qw( Celestial::Handler );
+
+push @ORDER, 'oai';
+
+use vars qw( $PARSER );
 
 use CGI qw/:standard -oldstyle_urls/;
 $CGI::USE_PARAM_SEMICOLONS = 0; # We really, really want ampersands
-use DBI;
 use URI::Escape qw/uri_escape_utf8 uri_unescape/;
 use HTML::Entities;
 use XML::LibXML;
 use Encode;
 
+use HTTP::OAI;
 use HTTP::OAI::Harvester;
-
-use Celestial::DBI;
-
-binmode(STDOUT,":utf8");
 
 %vars = CGI::Vars();
 
-# Connect to the database
-$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
-
 $PARSER = XML::LibXML->new();
 
-$source = substr(url(-path=>1),length(url()));
-undef $source unless $source;
+sub page
+{
+	my( $self, $CGI ) = @_;
+	my $dbh = $self->dbh;
 
-my $st = time();
+	my $source = $CGI->section_args;
+	my( $repo, $mdf );
+	my $u = URI->new( $CGI->url );
+	my %vars = $u->query_form;
 
-use vars qw( $repo $mdf );
-
-undef $repo;
-if( $source ) {
-	$source =~ s/^\///;
-	$source = uri_unescape($source);
-	my $repoid = $dbh->getRepositoryId($source);
-	$repo = $dbh->getRepository($repoid) if defined($repoid);
-}
-
-if( !defined($repo) ) {
-	print header(
-			-status=>'404 Not Found',
-			-type=>'text/html; charset=utf-8',
-			-charset=>'utf8',
-		),
-		start_html(
-			-title=>'404 Not Found',
-			-encoding=>'utf-8',
-		),
-		h1("404 Not Found"),
-		h3("Celestial (OAIA)"),
-		$source ? p("The requested repository ($source) was not found, perhaps you are looking for one of the following?") : p("Celestial no longer supports aggregation of OAI repositories, you can harvest individual repositories from the following URLs:");
-	print "<table><tr><th>Identifier</th><th>baseURL</th></tr>";
-	foreach my $repo ( $dbh->listRepositories ) {
-		my $id = $repo->identifier;
-		print "<tr><td>", encode_entities($id), "</td>",
-			"<td><a href=\"", url(), "/", uri_escape_utf8($id), "?verb=Identify\">",
-			encode_entities(url() . "/" . uri_escape_utf8($id)), 
-			"</a></td></tr>";
+	if( $source ) {
+		$source =~ s/^\///;
+		$source = uri_unescape($source);
+		my $repoid = $dbh->getRepositoryId($source);
+		$repo = $dbh->getRepository($repoid) if defined($repoid);
 	}
-	print "</table>";
-	print end_html;
-	exit();
-}
 
-print header(
-	-type=>'text/xml',
-	-expires=>'now',
-	-charset=>'utf-8'
+	unless( $repo ) {
+		$CGI->not_found;
+		return;
+	}
+
+	# Create the response object
+	my $r = $vars{ verb };
+	unless( $r =~ /^GetRecord|Identify|ListIdentifiers|ListMetadataFormats|ListRecords|ListSets$/ ) {
+		$r = "Response";
+	}
+	$r = "HTTP::OAI::$verb";
+	$r = $r->new(
+		requestURL=>$CGI->url,
+		xslt=>$CGI->as_link( 'static/celestial.xsl' ),
 	);
 
-my @errors = HTTP::OAI::Repository::validate_request(%vars);
-if( @errors ) {
-	my $r = new HTTP::OAI::Response(
-		requestURL=>CGI->new->self_url(),
-		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-	);
-	$r->errors(@errors);
+	$r->errors( HTTP::OAI::Repository::validate_request(%vars) );
+
+	if( my $set = $vars{set} ) {
+		if( !$repo->listSetIds($set) ) {
+			$r->errors(new HTTP::OAI::Error(
+				code=>'noMatchingRecords',
+				message=>'The specified set ("'.$vars{set}.'") does not exist.',
+			));
+		}
+	}
+	if( defined(my $mdp = $vars{metadataPrefix}) ) {
+		unless( defined( $mdf = $repo->getMetadataFormat($mdp) ) ) {
+			$r->errors(new HTTP::OAI::Error(code=>'cannotDisseminateFormat'));
+		}
+		x
+	}
+
+	if( $vars{from} && $vars{from} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
+		$vars{from} = "$1T00:00:00Z";
+	}
+	if( $vars{until} && $vars{until} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
+		$vars{until} = "$1T23:59:59Z";
+	}
+
+	$vars{from} =~ s/\D//g if $vars{from};
+	$vars{until} =~ s/\D//g if $vars{until};
+
+	unless( $r->errors ) {
+		$self->$f(
+			$r,
+			repository => $repo,
+			metadataFormat => $mdf,
+			baseURL => $CGI->as_link( 'oai' ) . '/' . uri_escape_utf8( $source ),
+			args => \%vars,
+		);
+	}
+
+	$CGI->content_type( 'text/xml; charset=utf-8' );
 	print $r->toDOM->toString;
-	exit();
-}
 
-if( my $set = $vars{set} ) {
-	if( !$repo->listSetIds($set) ) {
-		my $r = new HTTP::OAI::Response(
-			requestURL=>CGI->new->self_url(),
-			xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-		);
-		$r->errors(new HTTP::OAI::Error(
-			code=>'noMatchingRecords',
-			message=>'The specified set ("'.$vars{set}.'") does not exist.',
-		));
-		print $r->toDOM->toString;
-		exit();
-	}
-}
-if( defined(my $mdp = $vars{metadataPrefix}) ) {
-	unless( defined( $mdf = $repo->getMetadataFormat($mdp) ) ) {
-		my $r = new HTTP::OAI::Response(
-			requestURL=>CGI->new->self_url(),
-			xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-		);
-		$r->errors(new HTTP::OAI::Error(code=>'cannotDisseminateFormat'));
-		print $r->toDOM->toString;
-		exit();
-	}
-}
-
-if( $vars{from} && $vars{from} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
-	$vars{from} = "$1T00:00:00Z";
-}
-if( $vars{until} && $vars{until} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
-	$vars{until} = "$1T23:59:59Z";
-}
-
-$vars{from} =~ s/\D//g if $vars{from};
-$vars{until} =~ s/\D//g if $vars{until};
-
-$adminEmail = $dbh->adminEmail;
-$repositoryName = $dbh->repositoryName;
-
-my $r = process_request();
-print $r->toDOM->toString;
-
-$dbh->disconnect;
-
-sub process_request {
-	if( $vars{verb} eq 'GetRecord' ) {
-		&GetRecord();
-	} elsif( $vars{verb} eq 'Identify' ) {
-		&Identify();
-	} elsif( $vars{verb} eq 'ListIdentifiers' ) {
-		&ListIdentifiers();
-	} elsif( $vars{verb} eq 'ListMetadataFormats' ) {
-		&ListMetadataFormats();
-	} elsif( $vars{verb} eq 'ListRecords' ) {
-		&ListRecords();
-	} elsif( $vars{verb} eq 'ListSets' ) {
-		&ListSets();
-	}
+	return undef;
 }
 
 sub GetRecord {
-	my $r = new HTTP::OAI::GetRecord(
-			requestURL=>CGI->new->self_url(),
-			xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-	);
+	my( $self, $r, %args ) = @_;
+	my $dbh = $self->dbh;
+	my %vars = %{$args{args}};
+	my $repo = $args{ repository };
+	my $mdf = $args{ metadataFormat };
 
 	my $identifier = $vars{identifier};
 	my $id = $mdf->getRecordId( $identifier );
@@ -174,25 +127,23 @@ sub GetRecord {
 	return $r;
 }
 sub Identify {
-	my $r = new HTTP::OAI::Identify(
-		baseURL=>url(),
-		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl"
-	);
+	my( $self, $r, %args ) = @_;
+	my $dbh = $self->dbh;
+	my %vars = %{$args{args}};
+	my $repo = $args{ repository };
+	my $mdf = $args{ metadataFormat };
+
 	$r->deletedRecord('persistent');
 	$r->earliestDatestamp('0001-01-01');
 	$r->granularity('YYYY-MM-DDThh:mm:ssZ');
+	my $requestURL = $r->requestURL;
 	my $responseDate = $r->responseDate;
 
-	if( $source ) {
-		if( $repo->Identify and length($repo->Identify) > 0 ) {
-			$r->parse_string($repo->Identify);
-		} else {
-			undef $source;
-		}
-	}
-	if( !$source ) {
-		$r->adminEmail('mailto:' . $adminEmail);
-		$r->repositoryName($repositoryName);
+	if( $repo->Identify and length($repo->Identify) > 0 ) {
+		$r->parse_string($repo->Identify);
+	} else {
+		$r->adminEmail('mailto:' . $dbh->adminEmail);
+		$r->repositoryName($dbh->repositoryName);
 
 		my $sth = $dbh->prepare("SELECT distinct baseURL FROM Repositories ORDER BY baseURL");
 		$sth->execute;
@@ -210,18 +161,19 @@ sub Identify {
 		$r->description(new HTTP::OAI::Metadata(dom=>$dom));
 	}
 
+	# Reset to the correct data
 	$r->responseDate($responseDate);
-	$r->requestURL(CGI->new->self_url());
-
-	$r->baseURL(url() . ($source ? '/'.$source : ''));
+	$r->requestURL($requestURL);
+	$r->baseURL($args{ baseURL });
 
 	return $r;
 }
 sub ListIdentifiers {
-	my $r = new HTTP::OAI::ListIdentifiers(
-		requestURL=>CGI->new->self_url(),
-		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-	);
+	my( $self, $r, %args ) = @_;
+	my $dbh = $self->dbh;
+	my %vars = %{$args{args}};
+	my $repo = $args{ repository };
+	my $mdf = $args{ metadataFormat };
 
 	my ($rid,$from,$until,$set,$start,$mdp);
 	$rid = 0;
@@ -319,13 +271,14 @@ sub ListIdentifiers {
 	return $r;
 }
 sub ListMetadataFormats {
-	my $r = new HTTP::OAI::ListMetadataFormats(
-		requestURL=>CGI->new->self_url(),
-		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-	);
+	my( $self, $r, %args ) = @_;
+	my $dbh = $self->dbh;
+	my %vars = %{$args{args}};
+	my $repo = $args{ repository };
+	my $mdf = $args{ metadataFormat };
 
 	my $identifier = $vars{identifier};
-	my @mdfs = $dbh->listMetadataFormats($repo);
+	my @mdfs = $repo->listMetadataFormats;
 
 	if( defined($identifier) ) {
 		@mdfs = grep { defined($_->getRecordId( $identifier )) } @mdfs;
@@ -351,10 +304,11 @@ sub ListMetadataFormats {
 	return $r;
 }
 sub ListRecords {
-	my $r = new HTTP::OAI::ListRecords(
-		requestURL=>CGI->new->self_url(),
-		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-	);
+	my( $self, $r, %args ) = @_;
+	my $dbh = $self->dbh;
+	my %vars = %{$args{args}};
+	my $repo = $args{ repository };
+	my $mdf = $args{ metadataFormat };
 
 	my ($rid,$from,$until,$set,$start,$mdp);
 	$rid = 0;
@@ -471,10 +425,11 @@ sub ListRecords {
 	return $r;
 }
 sub ListSets {
-	my $r = new HTTP::OAI::ListSets(
-		requestURL=>CGI->new->self_url(),
-		xslt=>"http://celestial.eprints.org/stylesheets/celestial.xsl",
-	);
+	my( $self, $r, %args ) = @_;
+	my $dbh = $self->dbh;
+	my %vars = %{$args{args}};
+	my $repo = $args{ repository };
+	my $mdf = $args{ metadataFormat };
 
 	my $sth = $dbh->prepare("SELECT `id`,`setSpec`,`setName` FROM ".$repo->sets_table." ORDER BY `id`");
 	$sth->execute() or die $!;
@@ -496,44 +451,6 @@ sub ListSets {
 	}
 
 	return $r;
-}
-
-sub listMetadataFormats {
-	my $dbh = shift;
-	my %args = @_;
-	my ($identifier, $source) = ($args{-identifier},$args{-source});
-
-	my ($SQL, @LOGIC, @VALUES);
-
-	$SQL = "SELECT metadataPrefix,schema,metadataNamespace FROM MetadataFormats as mf ";
-	if( $identifier ) {
-		$SQL .= " INNER JOIN Metadata as m ON mf.id=m.repository ";
-		push(@LOGIC, "m.identifier = ?");
-		push(@VALUES, $identifier);
-	}
-	if( $source ) {
-		$SQL .= " INNER JOIN Repositories as r ON mf.repository=r.id ";
-		push(@LOGIC, "r.identifier = ?");
-		push(@VALUES, $source);
-	}
-
-	$SQL .= " WHERE " . join(' AND ', @LOGIC) if @LOGIC;
-	$SQL .= " GROUP BY metadataPrefix";
-
-	my $sth = $dbh->prepare($SQL);
-	$sth->execute(@VALUES);
-
-	my %mdps;
-	while( my ($mdp,$schema,$mdns) = $sth->fetchrow_array ) {
-		my $mdf = new HTTP::OAI::MetadataFormat;
-		$mdf->metadataPrefix($mdp);
-		$mdf->schema($schema);
-		$mdf->metadataNamespace($mdns);
-		$mdps{$mdp} = $mdf;
-	}
-	$sth->finish;
-
-	%mdps;
 }
 
 sub datestamp {
