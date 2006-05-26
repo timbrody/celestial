@@ -298,6 +298,7 @@ sub authenticate {
 	my( $self, $CGI ) = @_;
 
 	my $ip = $CGI->remote_ip;
+warn "Got remote ip [$ip]";
 
 	if( $CGI->authorised and $CGI->user ) {
 		my $key = _key(60);
@@ -307,6 +308,7 @@ warn "Logged in " . $CGI->user . " [$ip]";
 		return;
 	}
 
+warn "Fetching cookie";
 	my $key = $self->get_cookie( $CGI ) or return;
 
 warn "Got cookie: $key [$ip]";
@@ -352,6 +354,7 @@ sub get_cookie {
 	my( $self, $CGI ) = @_;
 
 	my $hdr = $CGI->request->headers_in->{ 'Cookie' } or return;
+warn "Got cookie header: [$hdr]";
 	my @jar = map { split /=/, $_, 2 } split /;/, $hdr;
 	return unless @jar % 2 == 0;
 	my %cookies = @jar;
