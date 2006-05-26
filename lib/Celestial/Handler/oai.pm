@@ -12,8 +12,8 @@ push @ORDER, 'oai';
 
 use vars qw( $PARSER );
 
-use CGI qw/:standard -oldstyle_urls/;
-$CGI::USE_PARAM_SEMICOLONS = 0; # We really, really want ampersands
+#use CGI qw/:standard -oldstyle_urls/;
+#$CGI::USE_PARAM_SEMICOLONS = 0; # We really, really want ampersands
 use URI::Escape qw/uri_escape_utf8 uri_unescape/;
 use HTML::Entities;
 use XML::LibXML;
@@ -22,8 +22,6 @@ use Encode;
 use HTTP::OAI;
 use HTTP::OAI::Harvester;
 
-%vars = CGI::Vars();
-
 $PARSER = XML::LibXML->new();
 
 sub page
@@ -31,9 +29,11 @@ sub page
 	my( $self, $CGI ) = @_;
 	my $dbh = $self->dbh;
 
-	my $source = $CGI->section_args;
+	my $source = $CGI->section_path;
 	my( $repo, $mdf );
-	my $u = URI->new( $CGI->url );
+	my $u = $CGI->url;
+	$u =~ s/;/&/g;
+	$u = URI->new( $u );
 	my %vars = $u->query_form;
 
 	if( $source ) {
@@ -49,11 +49,11 @@ sub page
 	}
 
 	# Create the response object
-	my $r = $vars{ verb };
-	unless( $r =~ /^GetRecord|Identify|ListIdentifiers|ListMetadataFormats|ListRecords|ListSets$/ ) {
+	my $r = $vars{ verb } || '';
+	unless( $r =~ /^(?:GetRecord|Identify|ListIdentifiers|ListMetadataFormats|ListRecords|ListSets)$/ ) {
 		$r = "Response";
 	}
-	$r = "HTTP::OAI::$verb";
+	$r = "HTTP::OAI::$r";
 	$r = $r->new(
 		requestURL=>$CGI->url,
 		xslt=>$CGI->as_link( 'static/celestial.xsl' ),
@@ -73,7 +73,6 @@ sub page
 		unless( defined( $mdf = $repo->getMetadataFormat($mdp) ) ) {
 			$r->errors(new HTTP::OAI::Error(code=>'cannotDisseminateFormat'));
 		}
-		x
 	}
 
 	if( $vars{from} && $vars{from} =~ /^(\d{4}-\d{2}-\d{2})$/ ) {
@@ -87,6 +86,7 @@ sub page
 	$vars{until} =~ s/\D//g if $vars{until};
 
 	unless( $r->errors ) {
+		my $f = $vars{ verb };
 		$self->$f(
 			$r,
 			repository => $repo,
@@ -97,7 +97,7 @@ sub page
 	}
 
 	$CGI->content_type( 'text/xml; charset=utf-8' );
-	print $r->toDOM->toString;
+	print $r->toDOM->toString(1);
 
 	return undef;
 }

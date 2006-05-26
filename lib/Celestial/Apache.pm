@@ -34,13 +34,15 @@ use Apache::Const qw( OK );
 #};
 
 use Celestial::Handler;
-use Celestial::Handler::static;
 use Celestial::Handler::login;
 use Celestial::Handler::logout;
 use Celestial::Handler::status;
 use Celestial::Handler::settings;
 use Celestial::Handler::import;
 use Celestial::Handler::repository;
+
+use Celestial::Handler::static;
+use Celestial::Handler::oai;
 
 sub handler
 {
