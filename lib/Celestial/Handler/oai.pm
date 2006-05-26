@@ -184,7 +184,8 @@ sub ListIdentifiers {
 	$mdp = $vars{metadataPrefix} || '';
 
 	if( exists($vars{resumptionToken}) ) {
-		my @args = decodeToken($vars{resumptionToken});
+		my $token = $vars{resumptionToken};
+		my @args = decodeToken($token);
 		($start,$from,$until,$mdp,$set) = @args;
 		if( !$mdp ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing"));
