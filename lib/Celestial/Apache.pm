@@ -1,4 +1,4 @@
-package Celestial::Apache::Config;
+package Celestial::Apache;
 
 use strict;
 use warnings;
