@@ -476,3 +476,5 @@ sub getMetadataContent {
 	}
 	return undef;
 }
+
+1;

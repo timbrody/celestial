@@ -1,0 +1,9 @@
+\.svn
+blib/
+pm_to_blib
+^MANIFEST\.
+\.tar\.gz$
+^Makefile$
+^Makefile.old$
+^_build
+^devel

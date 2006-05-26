@@ -2,17 +2,17 @@
 
 =head1 NAME
 
-B<harvest> - harvest all new records
+B<celestial> - harvest all new records
 
 =head1 SYNOPSIS
 
-B<harvest> [B<options>]
+B<celestial> [B<options>]
 
 =head1 DESCRIPTION
 
 This script downloads and stores all new records from configured repositories.
 
-harvest forks upto 10 child processes.
+celestial forks upto 10 child processes.
 
 =head1 OPTIONS
 
@@ -65,8 +65,6 @@ use strict;
 use warnings;
 
 binmode(STDOUT,":utf8");
-
-our $CFG_FILE = "/home/eprints/celestial/etc/celestial.conf";
 
 use POSIX qw/:sys_wait_h strftime/;
 
@@ -128,9 +126,8 @@ if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 }
 
 $DEBUG = $opt_verbose;
-$CFG_FILE = $opt_cfg if $opt_cfg;
 
-my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 
 $ADMINEMAIL = $dbh->adminEmail or die "No adminEmail configured (required to harvest)\n";
 $MAX_HARVESTERS = $dbh->maxHarvesters || 10;
@@ -166,7 +163,7 @@ foreach my $repo (@REPOS) {
 	my $pid;
 	if( $opt_fork && ($pid = fork()) ) {
 		$0 = "celestial-harvest-child";
-		$dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+		$dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 		$c++;
 		print "(parent) $c of $MAX_HARVESTERS harvesters spawned ($pid, " . $repo->identifier . ")\n" if $opt_verbose;
 		$CHILDREN{$pid} = $repo;
@@ -187,7 +184,7 @@ foreach my $repo (@REPOS) {
 		}
 	} else {
 		die "fork() failed: $!" if( $opt_fork && !defined($pid) );
-		my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+		my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 		$repo->dbh($dbh);
 
 		print "Updating repository " . $repo->identifier ."\n" if $opt_verbose;

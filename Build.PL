@@ -48,6 +48,7 @@ SUBCLASS
 
 my $build = $class->new(
 	module_name => 'Celestial',
+	script_files => ['bin/celestial', 'bin/celestial-report'],
 	license => 'perl',
 	requires => {
 		'HTTP::OAI::Harvester' => '3.17',

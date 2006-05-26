@@ -1,58 +1,40 @@
-#!/usr/bin/perl -w
-
-# See README.TXT for legal.
+package Celestial::Handler::listfriends;
 
 use strict;
+use warnings;
 
-use vars qw(%vars $source $source_id);
+use Celestial::Handler;
+use vars qw( @ISA );
+@ISA = qw( Celestial::Handler );
 
-use lib "/home/celestial/lib";
-my $CFG_FILE = "/home/celestial/etc/celestial.conf";
+push @ORDER, 'listfriends';
 
-use CGI qw/:standard/;
-use XML::LibXML;
-use Encode;
+use URI::Escape qw/uri_escape_utf8/;
 
-binmode(STDOUT,":utf8");
+sub page
+{
+	my( $self, $CGI ) = @_;
+	my $dbh = $self->dbh;
+	my $dom = $self->dom;
 
-use Celestial::DBI;
+	$dom->setDocumentElement(my $root = $dom->createElement('BaseURLs'));
 
-# Connect to the database
-my $dbh = Celestial::DBI->connect($CFG_FILE) or die "Unable to connect to database: $!";
+	my $c = 0;
+	my $mirror = $CGI->url->clone;
+	foreach my $repo ($dbh->listRepositories) {
+		$c++;
+		$mirror->path($CGI->as_link( 'oai' ) . '/' . uri_escape_utf8($repo->identifier));
+		$root->appendChild( dataElement( 'baseURL', $repo->baseURL, {
+			id => $repo->identifier,
+			mirror => $mirror,
+		}));
+	}
+	$root->setAttribute( 'number', $c );
 
-my $dom = XML::LibXML->createDocument('1.0','UTF-8');
+	$CGI->content_type( 'text/xml; charset=utf-8' );
+	$dom->toFH(\*STDOUT,1);
 
-$dom->setDocumentElement(my $root = $dom->createElement('BaseURLs'));
-
-my $sth = $dbh->prepare("SELECT identifier,baseURL FROM Repositories");
-$sth->execute;
-
-my ($identifier,$baseURL);
-$sth->bind_columns(\$identifier,\$baseURL);
-
-my $c = 0;
-
-my $url = url();
-$url =~ s/\/[^\/]*$//;
-$url .= "/oaia2/";
-
-while( $sth->fetch ) {
-	Encode::_utf8_on($identifier);
-	Encode::_utf8_on($baseURL);
-	my $repo = $root->appendChild($dom->createElement('baseURL'));
-	$repo->setAttribute('id',$identifier);
-	$repo->appendText($baseURL);
-	$repo->setAttribute('mirror',$url.$identifier);
-	$c++;
+	return undef;
 }
 
-$root->setAttribute('number',$c);
-
-$sth->finish;
-
-print header(
-	-type=>'text/xml',
-	-expires=>'now',
-	-charset=>'utf-8'
-),
-	$dom->toString;
+1;

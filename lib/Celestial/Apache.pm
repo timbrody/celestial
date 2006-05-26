@@ -43,6 +43,7 @@ use Celestial::Handler::repository;
 
 use Celestial::Handler::static;
 use Celestial::Handler::oai;
+use Celestial::Handler::listfriends;
 
 sub handler
 {
@@ -242,7 +243,6 @@ sub content_type {
 
 package Celestial::Auth;
 
-use CGI::Cookie;
 use vars qw( $dbh );
 
 sub new {
