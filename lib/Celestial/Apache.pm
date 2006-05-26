@@ -298,27 +298,20 @@ sub authenticate {
 	my( $self, $CGI ) = @_;
 
 	my $ip = $CGI->remote_ip;
-warn "Got remote ip [$ip]";
 
 	if( $CGI->authorised and $CGI->user ) {
 		my $key = _key(60);
 		$self->add_session( $CGI->user, $key, $ip );
 		$self->set_cookie( $CGI, $key );
-warn "Logged in " . $CGI->user . " [$ip]";
 		return;
 	}
 
-warn "Fetching cookie";
 	my $key = $self->get_cookie( $CGI ) or return;
 
-warn "Got cookie: $key [$ip]";
-
 	if( defined(my $user = $self->get_session( $key, $ip )) ) {
-warn "Got session [$user]";
 		$CGI->user( $user );
 		$CGI->authorised( 1 );
 	} else {
-warn "Failed to locate session [$key/$ip]";
 		$self->logout( $CGI );
 	}
 }
@@ -354,7 +347,6 @@ sub get_cookie {
 	my( $self, $CGI ) = @_;
 
 	my $hdr = $CGI->request->headers_in->{ 'Cookie' } or return;
-warn "Got cookie header: [$hdr]";
 	my @jar = map { split /=/, $_, 2 } split /;\s*/, $hdr;
 	return unless @jar % 2 == 0;
 	my %cookies = @jar;
