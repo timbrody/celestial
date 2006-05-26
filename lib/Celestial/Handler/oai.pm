@@ -320,16 +320,17 @@ sub ListRecords {
 	$mdp = $vars{metadataPrefix};
 
 	if( exists($vars{resumptionToken}) ) {
-		my @args = decodeToken($vars{resumptionToken});
+		my $token = $vars{resumptionToken} || '';
+		my @args = decodeToken($token);
 		($start,$from,$until,$mdp,$set) = @args;
 		if( !$mdp or !defined($mdf = $repo->getMetadataFormat( $mdp )) ) {
-			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing"));
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing [$token]"));
 		} elsif( length($start) > 10 ) {
-			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Starting offset (\"$start\") too long"));
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Starting offset (\"$start\") too long [$token]"));
 		} elsif( $from && length($from) != 14 ) {
-			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"From date (\"$from\") not 14 digits long"));
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"From date (\"$from\") not 14 digits long [$token]"));
 		} elsif( $until && length($until) != 14 ) {
-			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Until date (\"$until\") not 14 digits long"));
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Until date (\"$until\") not 14 digits long [$token]"));
 		}
 		return $r if $r->errors;
 	}
