@@ -355,7 +355,7 @@ sub get_cookie {
 
 	my $hdr = $CGI->request->headers_in->{ 'Cookie' } or return;
 warn "Got cookie header: [$hdr]";
-	my @jar = map { split /=/, $_, 2 } split /;/, $hdr;
+	my @jar = map { split /=/, $_, 2 } split /;\s*/, $hdr;
 	return unless @jar % 2 == 0;
 	my %cookies = @jar;
 
