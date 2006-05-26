@@ -303,15 +303,20 @@ sub authenticate {
 		my $key = _key(60);
 		$self->add_session( $CGI->user, $key, $ip );
 		$self->set_cookie( $CGI, $key );
+warn "Logged in " . $CGI->user . " [$ip]";
 		return;
 	}
 
 	my $key = $self->get_cookie( $CGI ) or return;
 
+warn "Got cookie: $key [$ip]";
+
 	if( defined(my $user = $self->get_session( $key, $ip )) ) {
+warn "Got session [$user]";
 		$CGI->user( $user );
 		$CGI->authorised( 1 );
 	} else {
+warn "Failed to locate session [$key/$ip]";
 		$self->logout( $CGI );
 	}
 }
