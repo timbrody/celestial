@@ -186,8 +186,10 @@ sub ListIdentifiers {
 	if( exists($vars{resumptionToken}) ) {
 		my @args = decodeToken($vars{resumptionToken});
 		($start,$from,$until,$mdp,$set) = @args;
-		if( !$mdp or !defined($mdf = $repo->getMetadataFormat($mdp)) ) {
+		if( !$mdp ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing"));
+		} elsif( !defined($mdf = $repo->getMetadataFormat( $mdp )) ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Invalid metadataPrefix part [$mdp] of resumption token missing [$token]"));
 		} elsif( length($start) > 10 ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Starting offset (\"$start\") too long"));
 		} elsif( $from && length($from) != 14 ) {
@@ -323,8 +325,10 @@ sub ListRecords {
 		my $token = $vars{resumptionToken} || '';
 		my @args = decodeToken($token);
 		($start,$from,$until,$mdp,$set) = @args;
-		if( !$mdp or !defined($mdf = $repo->getMetadataFormat( $mdp )) ) {
+		if( !$mdp ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"metadataPrefix part of resumption token missing [$token]"));
+		} elsif( !defined($mdf = $repo->getMetadataFormat( $mdp )) ) {
+			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Invalid metadataPrefix part [$mdp] of resumption token missing [$token]"));
 		} elsif( length($start) > 10 ) {
 			$r->errors(new HTTP::OAI::Error(code=>'badResumptionToken',message=>"Starting offset (\"$start\") too long [$token]"));
 		} elsif( $from && length($from) != 14 ) {
