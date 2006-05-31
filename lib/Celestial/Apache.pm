@@ -37,10 +37,11 @@ use Celestial::Handler;
 use Celestial::Handler::login;
 use Celestial::Handler::logout;
 use Celestial::Handler::status;
-use Celestial::Handler::settings;
+use Celestial::Handler::subscription;
 use Celestial::Handler::import;
-use Celestial::Handler::repository;
+use Celestial::Handler::settings;
 
+use Celestial::Handler::repository;
 use Celestial::Handler::static;
 use Celestial::Handler::oai;
 use Celestial::Handler::listfriends;
@@ -155,6 +156,7 @@ use Celestial::Config; # Exports $SETTINGS
 use YAML;
 use vars qw( $AUTOLOAD );
 use Apache::Const qw( REDIRECT NOT_FOUND );
+use URI::Escape qw( uri_unescape );
 
 sub new {
 	my( $class, %opts ) = @_;
@@ -206,6 +208,12 @@ sub msg {
 	return $phrase;
 }
 
+sub date {
+	my( $self, $ds ) = @_;
+	return '?' unless $ds;
+	return $self->datestamp( substr($ds,0,8) );
+}
+
 sub datestamp {
 	my( $self, $ds ) = @_;
 	return '?' unless $ds;
@@ -239,6 +247,35 @@ sub not_found {
 sub content_type {
 	my $self = shift;
 	$self->request->content_type( shift );
+}
+
+sub valid_email {
+	my( $self, $email ) = @_;
+	return $email =~ /^[A-Za-z0-9_\-]+\@(?:[A-Za-z0-9_\-]+\.)+[A-Za-z]{2,4}$/;
+}
+
+sub set_cookie {
+	my( $self, $name, $value, %opts ) = @_;
+	$opts{ -name } ||= $name;
+	$opts{ -value } ||= $value;
+	$opts{ -expires} ||= 0;
+	$opts{ -path } ||= $self->script_path;
+	$opts{ -domain } ||= $self->hostname;
+
+	my $cookie = CGI::cookie(%opts);
+
+	return $self->request->err_headers_out->add('Set-Cookie' => $cookie);
+}
+
+sub get_cookie {
+	my( $self, $name ) = @_;
+	
+	my $hdr = $self->request->headers_in->{ 'Cookie' } or return;
+	my @jar = map { split /=/, $_, 2 } split /;\s*/, $hdr;
+	return unless @jar % 2 == 0;
+	my %cookies = @jar;
+
+	return uri_unescape($cookies{ $name });
 }
 
 package Celestial::Auth;
@@ -332,26 +369,13 @@ sub logout($$) {
 sub set_cookie {
 	my( $self, $CGI, $value ) = @_;
 
-	my $cookie = CGI::cookie(
-			-name => $self->_cname,
-			-value => $value,
-			-expires => 0,
-			-path => $CGI->script_path,
-			-domain => $CGI->hostname,
-	);
-
-	$CGI->request->err_headers_out->add('Set-Cookie' => $cookie);
+	return $CGI->set_cookie( $self->_cname, $value );
 }
 
 sub get_cookie {
 	my( $self, $CGI ) = @_;
 
-	my $hdr = $CGI->request->headers_in->{ 'Cookie' } or return;
-	my @jar = map { split /=/, $_, 2 } split /;\s*/, $hdr;
-	return unless @jar % 2 == 0;
-	my %cookies = @jar;
-
-	return $cookies{ $self->_cname };
+	return $CGI->get_cookie( $self->_cname );
 }
 
 1;

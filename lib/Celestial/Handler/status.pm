@@ -25,7 +25,7 @@ sub body {
 
 	my $body = $dom->createElement( 'div' );
 
-	my $table = $body->appendChild( dataElement( 'table' ));
+	my $table = $body->appendChild( dataElement( 'table', undef, {class=>'status'} ));
 	$table->appendChild( my $caption = dataElement( 'caption' ));
 
 #	my $row = $table->appendChild( dataElement( 'tr' ));
@@ -45,17 +45,17 @@ sub body {
 		my $row;
 		foreach my $mdf (@mdfs) {
 			my $ds = $mdf->lastHarvest ?
-				$CGI->datestamp($mdf->lastHarvest) :
+				$CGI->date($mdf->lastHarvest) :
 				$CGI->msg( 'status.noharvestyet' );
 			$row = $table->appendChild( dataElement( 'tr', undef, {class=>$c%2 ? 'oddrow' : 'evenrow'} ));
-			$row->appendChild( dataElement( 'td', dataElement( 'a', $repo->identifier, {href=>$edit_url}) ));
+			$row->appendChild( dataElement( 'td', dataElement( 'a', $repo->identifier, {href=>$edit_url, class=>'status'}) ));
 			$row->appendChild( dataElement( 'td', urlElement( $repo->baseURL )));
 			$row->appendChild( dataElement( 'td', $mdf->metadataPrefix ));
 			$row->appendChild( dataElement( 'td', $ds ));
 		}
 		unless(@mdfs) {
 			$row = $table->appendChild( dataElement( 'tr', undef, {class=>$c%2 ? 'oddrow' : 'evenrow'} ));
-			$row->appendChild( dataElement( 'td', dataElement( 'a', $repo->identifier, {href=>$edit_url}) ));
+			$row->appendChild( dataElement( 'td', dataElement( 'a', $repo->identifier, {href=>$edit_url, class=>'status'}) ));
 			$row->appendChild( dataElement( 'td', urlElement( $repo->baseURL )));
 			$row->appendChild( dataElement( 'td', 'No metadata formats found', {colspan=>2, align=>'center'}));
 		}

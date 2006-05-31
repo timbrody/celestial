@@ -99,7 +99,9 @@ sub abbr_url {
 	my $maxlen = shift || 50;
 	if( length($uri) > $maxlen ) {
 		my $path = $uri->path;
-		$path =~ s/^(.{0,10}).*(\/[^\/]+)$/$1...$2/;
+		my $m = length($uri)-$maxlen;
+		$m = 4 if $m < 4;
+		$path =~ s/^.{4,$m}(.*\/[^\/]+)$/...$1/;
 		$uri->path($path);
 	}
 	return $uri;
@@ -130,9 +132,12 @@ sub formElement
 	$opts{ hidden } ||= {};
 
 	my $form = dataElement('form',undef,{method=>'get',action=>$CGI->form_action});
-	$form->appendChild(my $fs = dataElement('fieldset',undef,{class => $opts{ legend } ? 'normal' : 'input'} ));
+	$form->appendChild(my $fs = dataElement('fieldset',undef,{class => $opts{ legend } ? 'input' : 'nolegend'} ));
 	if( $opts{ legend } ) {
 		$fs->appendChild(dataElement('legend', $opts{ legend }));
+	}
+	if( $opts{ note } ) {
+		$fs->appendChild( dataElement( 'p', $opts{ note }, {class => 'input'}));
 	}
 
 	while(my ($name, $value) = each %{$opts{hidden}}) {
@@ -147,7 +152,7 @@ sub formElement
 		$field->{ size } ||= 50;
 		my $label = delete($field->{ label }) || $CGI->msg( 'input.'.$name );
 		$table->appendChild(my $tr = dataElement('tr',undef,{class=>'input'}));
-		$tr->appendChild(my $td = dataElement('td',undef,{class=>'input'}));
+		$tr->appendChild(my $td = dataElement('td',undef,{class=>'label'}));
 		$td->appendChild(dataElement('label',$label,{'for'=>$name}));
 		$tr->appendChild($td = dataElement('td',undef,{class=>'input'}));
 		$td->appendChild(dataElement('input',undef,{%$field,id=>$name}));
@@ -162,6 +167,12 @@ sub formElement
 }
 
 sub error {
+	my( $self, $CGI, $msg ) = @_;
+
+	return dataElement( 'div', $msg, {class=>'error'});
+}
+
+sub notice {
 	my( $self, $CGI, $msg ) = @_;
 
 	return dataElement( 'div', $msg, {class=>'error'});

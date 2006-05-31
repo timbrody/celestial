@@ -202,6 +202,44 @@ td.unknown {
 }
 
 table {
-	border-top: 1px #000 solid;
-	border-bottom: 1px #000 solid;
+	border-top: 1px #888 solid;
+	border-bottom: 1px #888 solid;
+}
+caption {
+	font-weight: bold;
+	font-size: 80%;
+}
+th {
+	color: #000;
+	background-color: #ee0;
+	border-bottom: 2px #aa0 solid;
+	font-size: 90%;
+}
+
+table.status {
+	font-size: 90%;
+}
+
+fieldset.nolegend {
+	border: none;
+}
+fieldset.input {
+	border-bottom: none;
+	border-right: none;
+	border-left: none;
+}
+p.input {
+	width: 30em;
+	font-size: 90%;
+	margin: 0px;
+	padding: 0px;
+}
+table.input {
+	border: none;
+}
+td.label {
+	width: 12em;
+}
+td.input {
+	width: 22em;
 }

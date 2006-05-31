@@ -28,22 +28,11 @@ sub body {
 
 	$body->appendChild( dataElement( 'h2', $repo->identifier ));
 
-	$body->appendChild( formElement($CGI,
-		hidden => {
-			repository => $repo->id,
-		},
-		legend => $CGI->msg( 'repository.subscribe.legend' ),
-		fields => [{
-			name => 'email',
-		},{
-			name => 'frequency',
-			value => 14,
-			size => 3,
-		}],
-		submit => {
-			value => $CGI->msg( 'repository.subscribe' ),
-		},
-	));
+	$self->_oai_links($body, $CGI, $repo);
+
+	$body->appendChild( dataElement( 'p' ));
+
+	$self->_subscribe($body, $CGI, $repo);
 
 	if( $CGI->authorised ) {
 		$self->_can_edit( $body, $CGI, $repo );
@@ -53,6 +42,82 @@ sub body {
 
 	return $body;
 }
+
+sub _oai_links {
+	my( $self, $body, $CGI, $repo ) = @_;
+
+	my $baseurl = $CGI->as_link('oai/' . $repo->identifier);
+
+	$body->appendChild( my $table = dataElement( 'table' ));
+	$table->appendChild( dataElement( 'caption', $CGI->msg( 'repository.oai' )));
+
+	foreach my $verb (qw(Identify ListMetadataFormats ListSets)) {
+		$baseurl->query_form(verb => $verb);
+		$table->appendChild( my $tr = dataElement( 'tr' ));
+		$tr->appendChild( dataElement( 'td', $verb ));
+		$tr->appendChild( dataElement( 'td', urlElement( $baseurl )));
+	}
+#	foreach my $mdf ($repo->listMetadataFormats) {
+#		foreach my $verb (qw(ListIdentifiers ListRecords)) {
+#			$baseurl->query_form(
+#				verb => $verb,
+#				metadataPrefix => $mdf->metadataPrefix
+#			);
+#			$table->appendChild( my $tr = dataElement( 'tr' ));
+#			$tr->appendChild( dataElement( 'td', $verb . '/' . $mdf->metadataPrefix ));
+#			$tr->appendChild( dataElement( 'td', urlElement( $baseurl )));
+#		}
+#	}
+}
+
+sub _subscribe {
+	my( $self, $body, $CGI, $repo ) = @_;
+	my $dbh = $self->dbh;
+
+	my $email = $CGI->param( 'email' ) || $CGI->get_cookie( 'email' ) || '';
+	my $freq = $CGI->param( 'frequency' );
+	$CGI->set_cookie( 'email', $email ) if $email;
+
+	if( $email and $freq ) {
+		my $rep;
+		if( !$CGI->valid_email( $email ) ) {
+			$body->appendChild( $self->error( $CGI, $CGI->msg( 'error.email', $email) ));
+		} elsif( !($freq >= 7 and $freq <= 90) ) {
+			$body->appendChild( $self->error( $CGI, $CGI->msg( 'error.frequency', $freq )));
+#		} elsif( defined($rep = $repo->getReport( $email )) ) {
+#			$repo->removeReport( $email );
+#			$body->appendChild( $self->notice( $CGI, $CGI->msg( 'subscribe.unsubscribed', $email, $freq )));
+		} else {
+			$repo->addReport({
+				email => $email,
+				frequency => $freq,
+				include => 0,
+				confirmed => '',
+			});
+			$body->appendChild( $self->notice( $CGI, $CGI->msg( 'subscribe.subscribed', $email, $freq )));
+		}
+	}
+
+	$body->appendChild( formElement($CGI,
+		hidden => {
+			repository => $repo->id,
+		},
+		legend => $CGI->msg( 'repository.subscribe.legend' ),
+		fields => [{
+			name => 'email',
+			value => $email,
+		},{
+			name => 'frequency',
+			value => 14,
+			size => 2,
+			maxlength => 2,
+		}],
+		submit => {
+			value => $CGI->msg( 'repository.subscribe' ),
+		},
+	));
+}
+
 
 sub _display {
 	my( $self, $body, $CGI, $repo ) = @_;
@@ -67,6 +132,8 @@ sub _display {
 
 sub _can_edit {
 	my( $self, $body, $CGI, $repo ) = @_;
+
+	$body->appendChild( dataElement( 'h4', $CGI->msg( 'repository.subtitle.canedit' )));
 
 	my $update;
 	my @fields = ();
@@ -101,6 +168,8 @@ sub _can_edit {
 
 sub _list_mdfs {
 	my( $self, $body, $CGI, $repo ) = @_;
+
+	$body->appendChild( dataElement( 'h4', $CGI->msg( 'repository.subtitle.mdfs' )));
 
 	foreach my $mdf ($repo->listMetadataFormats) {
 		my $tr;

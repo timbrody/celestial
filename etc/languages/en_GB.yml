@@ -6,6 +6,7 @@ navbar.logout: Logout ($1)
 navbar.status: Archives' Status
 navbar.import: Register new Archive(s)
 navbar.settings: General Settings
+navbar.subscription: Edit Subscriptions
 
 import.title: Register new Archives
 import.check.legend: Checking URLs using OAI Identify ...
@@ -21,8 +22,10 @@ input.repositoryName: Celestial Name
 input.maxHarvesters: Maximum Simultaneous Harvest Processes
 input.identifier: Identifier
 input.baseURL: OAI Base URL
-input.email: Enter your email address
-input.frequency: Days between reports
+input.email: Enter your Email Address
+input.frequency: Days Between Report
+input.confirm: Are you sure?
+input.previous: Last Report Sent
 
 mdf.schema: Metadata Schema
 mdf.metadatanamespace: Metadata Namespace
@@ -47,5 +50,28 @@ repository.legend: Edit general archive settings
 repository.submit: Update settings
 repository.subscribe.legend: Subscribe to receive reports on this repository
 repository.subscribe: Subscribe
+repository.oai: Get metadata using OAI-PMH
+repository.subtitle.canedit: Edit Repository Settings
+repository.subtitle.mdfs: Supported Metadata Formats
+
+subscribe.subscribed: Reports will be sent to $1 every $2 days.
+subscribe.unsubscribed: Reports will no longer be sent to $1.
+
+subscription.submit: Show Subscriptions
+subscription.title: Report Subscriptions
+subscription.caption: Current Subscriptions
+subscription.remove: Unsubscribe
+subscription.subtitle: Subscriptions for '$1'
+subscription.removeall.confirm: Confirm removal of all subscriptions
+subscription.removeall.legend: Remove all subscriptions
+subscription.removeall.submit: Remove All
+subscription.removed: Removed subscription to '$1'.
+subscription.removedall: Removed all subscriptions.
+subscription.combine.warning: Note this will reset the date of all reports you're subscribed to!
+subscription.combine.legend: Combine all reports into a single email
+subscription.combine.submit: Combine
 
 error.no_auth: You must log in to access this feature.
+error.email: $1 is not a valid email address.
+error.frequency: Frequency must be between 7 and 90 days.
+error.nosubscriptions: No subscriptions found for '$1'.

@@ -62,11 +62,13 @@ sub default {
 	
 	$body->appendChild( formElement($CGI,
 		legend => $CGI->msg( 'import.query.legend' ),
+		fields => [{
+			name => 'query_url',
+		}],
 		submit => {
 			name => 'action',
 			value => $CGI->msg( 'import.query.submit' ),
 		},
-		fields => [{name => 'query_url', size => 100}],
 	));
 }
 

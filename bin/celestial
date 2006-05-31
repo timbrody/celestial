@@ -604,6 +604,8 @@ sub harvest_Fulltext
 				});
 			}
 		}
+
+		sleep(rand(5)); # Pause for at least a few seconds between records
 	}
 	$sth->finish;
 	return $st;

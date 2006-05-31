@@ -601,6 +601,25 @@ sub getFulltext {
 	});
 }
 
+sub listReportsByEmail {
+	my( $dbh, $email ) = @_;
+	my $cols = join(',',
+		map({ "`$_`" } @Celestial::Report::COLUMNS),
+		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT')" } @Celestial::Report::DATE_COLUMNS));
+	
+	my $sth = $dbh->prepare( "SELECT $cols FROM Reports WHERE `email`=?" );
+	$sth->execute( $email ) or Carp::confess $!;
+	my @reps;
+	while( my $row = $sth->fetchrow_hashref ) {
+		push @reps, Celestial::Report->new({
+			%$row,
+			dbh => $dbh,
+			repository => $dbh->getRepository( $row->{ repository } )
+		});
+	}
+	return @reps;
+}
+
 # Internal set/get values from the MetadataFormats table (status part)
 
 sub _status
@@ -640,8 +659,8 @@ sub lastHarvest($@) {
 
 sub setCardinality
 {
-	my( $self, $mdf ) = @_;
-	return $self->_status( $mdf->id, 'cardinality', @_ );
+	my( $self, $mdf, $c ) = @_;
+	return $self->_status( $mdf->id, 'cardinality', $c );
 }
 
 =item $ts = $dbh->lastAttempt($mdf,[ $ts ])
@@ -772,25 +791,28 @@ sub updateMetadata($$$)
 	$self->do("LOCK TABLES $tblname WRITE");
 
 	my $sth = $self->prepare("SELECT `id`,`accession` FROM $tblname WHERE `identifier`=?");
-	$sth->execute($rec->identifier) or die $!;
+	$sth->execute($rec->identifier)
+		or die "Error writing to $tblname: $!";
 	my( $id, $accession ) = $sth->fetchrow_array;
 
 	# Remove the existing record
 	if( defined($id) ) {
 		$self->do("DELETE FROM $tblname WHERE `identifier`=?",{},
 			$rec->identifier
-		);
+		) or die "Error writing to $tblname: $!";
 	} else {
 		$accession = $rec->datestamp;
 	}
 
 	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,?,?,?)");
-	$sth->execute($id,$accession,$rec->identifier,$hd,$md,$ab);
+	$sth->execute($id,$accession,$rec->identifier,$hd,$md,$ab)
+		or die "Error writing to $tblname: $!";
 	$sth->finish;
 	$id = $sth->{'mysql_insertid'} unless defined($id);
 
 	# Update the cursor
-	$self->do("UPDATE $tblname SET `datestamp`=`datestamp`, `cursor`=CONCAT(DATE_FORMAT(`datestamp`,'\%Y\%m\%d\%H\%i\%S'),LPAD(MOD(`id`,1000),3,'0')) WHERE `id`=?",{},$id);
+	$self->do("UPDATE $tblname SET `datestamp`=`datestamp`, `cursor`=CONCAT(DATE_FORMAT(`datestamp`,'\%Y\%m\%d\%H\%i\%S'),LPAD(MOD(`id`,1000),3,'0')) WHERE `id`=?",{},$id)
+		or die "Error writing to $tblname: $!";
 
 	$self->do("UNLOCK TABLES");
 
@@ -1490,10 +1512,11 @@ Celestial::Report
 
 package Celestial::Report;
 
-use vars qw(@ISA @FIELDS);
+use vars qw(@ISA @COLUMNS @DATE_COLUMNS);
 @ISA = qw(Celestial::Encapsulation);
 
-@FIELDS = qw(repository email confirmed frequency previous include);
+@COLUMNS = qw(repository email confirmed frequency include);
+@DATE_COLUMNS = qw(previous);
 
 sub new
 {
@@ -1505,21 +1528,23 @@ sub new
 sub addReport
 {
 	my( $self, $dbh, $rec ) = @_;
-	$dbh->do("REPLACE Report (".join(',',@FIELDS).") VALUES (".join(',',map {'?'} @FIELDS).")", {},
-		@$rec{@FIELDS}
+	$rec->{repository} = $rec->{repository}->id
+		if ref($rec->{repository});
+	$dbh->do("REPLACE Reports (".join(',',@COLUMNS,@DATE_COLUMNS).") VALUES (".join(',',map {'?'} @COLUMNS,@DATE_COLUMNS).")", {},
+		@$rec{@COLUMNS,@DATE_COLUMNS}
 	) or Carp::confess($!);
 }
 
 sub removeReport
 {
 	my( $self, $dbh, $repo, $email ) = @_;
-	$dbh->do("DELETE FROM Report WHERE repository=? AND email=?",{},$repo->id,$email) or Carp::confess($!);
+	$dbh->do("DELETE FROM Reports WHERE repository=? AND email=?",{},$repo->id,$email) or Carp::confess($!);
 }
 
 sub getReport
 {
 	my( $self, $dbh, $repo, $email ) = @_;
-	my $sth = $dbh->prepare("SELECT ".join(',',@FIELDS).',DATE_FORMAT(previous,"%Y%m%d%H%i%s") AS previous FROM Report WHERE repository=? AND email=?');
+	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).",DATE_FORMAT(previous,'$Celestial::DBI::DATE_FORMAT') AS previous FROM Reports WHERE repository=? AND email=?");
 	$sth->execute($repo->id,$email) or Carp::confess($!);
 	my $row = $sth->fetchrow_hashref or return;
 	$sth->finish;
@@ -1534,7 +1559,7 @@ sub listReports
 {
 	my( $self, $dbh, $repo ) = @_;
 	my @reps;
-	my $sth = $dbh->prepare("SELECT ".join(',',@FIELDS).',DATE_FORMAT(previous,"%Y%m%d%H%i%s") AS previous FROM Report WHERE repository=?');
+	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).',DATE_FORMAT(previous,"%Y%m%d%H%i%s") AS previous FROM Reports WHERE repository=?');
 	$sth->execute($repo->id) or Carp::confess($!);
 	while( my $row = $sth->fetchrow_hashref ) 
 	{
@@ -1551,7 +1576,7 @@ sub listReports
 sub isDue
 {
 	my $self = shift;
-	my $sth = $self->dbh->prepare("SELECT 1 FROM Report WHERE repository=? AND email=? AND confirmed is not Null AND (previous is Null OR previous + INTERVAL frequency DAY <= NOW())");
+	my $sth = $self->dbh->prepare("SELECT 1 FROM Reports WHERE repository=? AND email=? AND confirmed is not Null AND (previous is Null OR previous + INTERVAL frequency DAY <= NOW())");
 	$sth->execute( $self->repository->id, $self->email );
 	my ($r) = $sth->fetchrow_array;
 	$sth->finish;
@@ -1561,19 +1586,29 @@ sub isDue
 sub touch
 {
 	my $self = shift;
-	$self->dbh->do("UPDATE Report SET previous=NOW() WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
+	$self->dbh->do("UPDATE Reports SET previous=NOW() WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
 }
 
 sub reset
 {
 	my $self = shift;
-	$self->dbh->do("UPDATE Report SET previous=Null WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
+	$self->dbh->do("UPDATE Reports SET previous=Null WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
 }
 
 sub confirm
 {
 	my $self = shift;
-	$self->dbh->do("UPDATE Report SET confirmed='' WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
+	$self->dbh->do("UPDATE Reports SET confirmed='' WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
+}
+
+sub commit
+{
+	my $self = shift;
+	my $rec;
+	for(@COLUMNS,@DATE_COLUMNS) {
+		$rec->{ $_ } = $self->$_;
+	}
+	$self->addReport($self->dbh, $rec);
 }
 
 =item $rep->recordsReport
