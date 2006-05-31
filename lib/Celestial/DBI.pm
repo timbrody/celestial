@@ -98,17 +98,26 @@ sub connect {
 	my $self = $class->new();
 	my $db = $Celestial::Config::SETTINGS
 		or die "Unable to get database settings";
-	my $user = $db->{ username };
-	my $pw = $db->{ password };
+	my $user = $self->{_username} = $db->{ username };
+	my $pw = $self->{_password} = $db->{ password };
 	my @opts;
 	for(qw( database host port )) {
 		next unless exists( $db->{ $_ });
 		push @opts, join( '=', $_ => $db->{ $_ });
 	}
-	my $dsn = "dbi:mysql:" . join(';', @opts);
+	my $dsn = $self->{_dsn} = "dbi:mysql:" . join(';', @opts);
 	$self->dbh(DBI->connect($dsn, $user, $pw))
 		or return undef;
 	return $self;
+}
+
+sub reconnect {
+	my $self = shift;
+	# Don't overwrite the existing handle in case we need the error message
+	# that triggered this reconnect
+	my $dbh = DBI->connect($self->{_dsn}, $self->{_username}, $self->{_password})
+		or return undef;
+	return $self->dbh( $dbh );
 }
 
 =pod
@@ -182,20 +191,23 @@ sub timestamp {
 	}
 }
 
-# !!!This may stop DBI from closing its connections!!!
-#sub DESTROY {
-#	my $self = shift;
-#	$self->dbh->DESTROY(@_) if $self->dbh;
-#}
+sub DESTROY {}
 
 sub AUTOLOAD {
 	my $self = shift;
 	$AUTOLOAD =~ s/^.*:://;
 #	warn "${self}::$AUTOLOAD(".join(',',@_).")\n";
-	return if $AUTOLOAD eq 'DESTROY';
 	my @r;
+	RETRY:
 	eval { @r = ($self->dbh->$AUTOLOAD(@_)) };
-	Carp::confess $self->dbh->errstr if $self->dbh->{RaiseError} and $self->dbh->err;
+	if( $self->dbh->err ) {
+		if( $self->dbh->errstr =~ /MySQL server has gone away/ ) {
+			if( $self->reconnect ) {
+				goto RETRY;
+			}
+		}
+		Carp::confess $self->dbh->errstr if $self->dbh->{RaiseError};
+	}
 	return wantarray ? @r : $r[0];
 }
 

@@ -83,7 +83,7 @@ use Pod::Usage;
 
 use HTTP::OAI;
 use HTTP::OAI::Metadata::OAI_DC;
-use HTTP::OAI::FullText;
+use Celestial::FullText;
 use Celestial::DBI;
 use Date::Parse;
 use File::Temp;
@@ -557,8 +557,8 @@ sub harvest_Fulltext
 		));
 		$rec->metadata->generate;
 		$rec->metadata( $dc );
-		$HTTP::OAI::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
-		my $ft = HTTP::OAI::FullText->new(
+		$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
+		my $ft = Celestial::FullText->new(
 			$ha,
 			server_type => $st,
 			record => $rec
