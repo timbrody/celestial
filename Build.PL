@@ -52,7 +52,8 @@ my $build = $class->new(
 	license => 'perl',
 	requires => {
 		'HTTP::OAI::Harvester' => '3.17',
-		'URI::Find' => 0.1,
+		'URI::Find' => '0.1',
+		'CGI' => '3.06',
 	},
 	install_path => {
 		conf => '/etc/celestial',

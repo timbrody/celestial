@@ -10,6 +10,16 @@ use vars qw( @ISA );
 
 push @ORDER, 'static';
 
+# Avoid a heavy dependency in MIME::Types
+our %MIME_TYPES = qw(
+txt text/plain
+css text/css
+xsl text/xml
+gif image/gif
+jpg image/jpeg
+jpeg image/jpeg
+);
+
 sub page
 {
 	my( $self, $CGI ) = @_;
@@ -28,10 +38,8 @@ sub page
 		return;
 	}
 
-	if( $file =~ /\.css$/ ) {
-		$CGI->content_type( 'text/css' );
-	} elsif( $file =~ /\.xsl$/ ) {
-		$CGI->content_type( 'text/xml' );
+	if( $file =~ /\.(\w+)$/ and exists($MIME_TYPES{$1}) ) {
+		$CGI->content_type( $MIME_TYPES{$1} );
 	} else {
 		$CGI->content_type( 'text/html' );
 	}

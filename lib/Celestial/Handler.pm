@@ -25,24 +25,39 @@ sub new {
 
 sub dbh { shift->{dbh} }
 sub dom { shift->{dom} }
+sub onload {
+	@_ == 2 ?
+	 $_[0]->{ body }->setAttribute( 'onload', $_[1] ) :
+	 $_[0]->{ body }->getAttribute( 'onload ');
+}
+
+sub head {
+	my( $self, $CGI ) = @_;
+	my $dbh = $self->dbh;
+
+	my $head = dataElement( 'head' );
+
+	$head->appendChild(dataElement( 'title', $dbh->repositoryName . ' - ' . $self->title( $CGI )));
+	$head->appendChild(dataElement( 'style', "\@import url('".$CGI->as_link('static/generic.css')."');", { type => 'text/css', media => 'screen' }));
+
+	return $head;
+}
 
 sub page {
 	my( $self, $CGI ) = @_;
+	my $dbh = $self->dbh;
 
 	$dom->createInternalSubset( "html", "-//W3C//DTD XHTML 1.0 Strict//EN", "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd" );
 
 	$dom->setDocumentElement(my $doc = $dom->createElement('html'));
 
-	$doc->appendChild(my $head = $dom->createElement('head'));
+	$doc->appendChild($self->head( $CGI ));
 	$doc->appendChild(my $body = $dom->createElement('body'));
+	$self->{ body } = $body;
 
-	$head->appendChild(dataElement( 'style', "\@import url('".$CGI->as_link('static/generic.css')."');", { type => 'text/css', media => 'screen' }));
-
-	# Window title
-	my $wtitle = $head->appendChild(dataElement( 'title', 'Celestial - ' ))->getFirstChild;
 
 	# Body title
-	my $ptitle = $body->appendChild(dataElement( 'h1', 'Celestial - '))->getFirstChild;
+	$body->appendChild(dataElement( 'h1', $dbh->repositoryName . ' - ' . $self->title($CGI)));
 
 	# Top navigation bar
 	$body->appendChild(my $topbar = dataElement( 'div', undef, {class=>'topbar'} ));
@@ -55,9 +70,6 @@ sub page {
 		my $li = dataElement( 'li', $link, {class=>$_ eq $CGI->section ? 'navbar hilite' : 'navbar'} );
 		$navbar->appendChild( $li ) if defined($li);
 	}
-
-	$wtitle->appendData( $self->title($CGI) );
-	$ptitle->appendData( $self->title($CGI) );
 
 	$body->appendChild( $self->body($CGI) );
 

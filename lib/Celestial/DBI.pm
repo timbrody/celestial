@@ -1074,10 +1074,12 @@ EOS
 sub new {
 	my $self = shift->SUPER::new(@_);
 	$self->require(qw( dbh identifier baseURL ));
-	foreach my $type (keys %SETS_SCHEMA) {
-		my $fn = lc($type) . '_table';
-		my $tblname = $type . "_" . $self->id;
-		$self->$fn($tblname);
+	if( defined($self->id) ) {
+		foreach my $type (keys %SETS_SCHEMA) {
+			my $fn = lc($type) . '_table';
+			my $tblname = $type . "_" . $self->id;
+			$self->$fn($tblname);
+		}
 	}
 	$self;
 }

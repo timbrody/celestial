@@ -3,6 +3,8 @@ package Celestial::Handler::import;
 use strict;
 use warnings;
 
+use utf8;
+
 use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
@@ -33,6 +35,27 @@ sub title {
 	return $CGI->msg( 'import.title' );
 }
 
+sub page {
+	my( $self, $CGI ) = @_;
+
+	if( $CGI->param( 'ajax' )) {
+		return $self->_ajax( $CGI );
+	}
+
+	return $self->SUPER::page( $CGI );
+}
+
+sub head {
+	my( $self, $CGI ) = @_;
+
+	my $head = $self->SUPER::head( $CGI );
+	
+	$head->appendChild( dataElement( 'script', undef, {type=>'text/javascript', src=>$CGI->as_link('static/ajax/utils.js')}));
+	$head->appendChild( dataElement( 'script', undef, {type=>'text/javascript', src=>$CGI->as_link('static/ajax/handler/'.$CGI->section.'.js')}));
+
+	return $head;
+}
+
 sub body {
 	my( $self, $CGI ) = @_;
 	my $dbh = $self->dbh;
@@ -41,8 +64,6 @@ sub body {
 	return $self->no_auth( $CGI ) unless $CGI->authorised;
 
 	my $body = $dom->createElement( 'div' );
-
-	my $action = lc($CGI->param( 'action' ) || '');
 
 	if( $CGI->param( 'base_url_count' ) or my @qurls = $CGI->param( 'base_url' ) ) {
 		$self->process_urls( $body, $CGI, @qurls );
@@ -128,11 +149,12 @@ sub extract_urls {
 		}
 	}
 
-	$body->appendChild( my $form = dataElement( 'form', undef, {method=>'post',action=>$CGI->form_action} ));
+	$body->appendChild( my $form = dataElement( 'form', undef, {method=>'post',action=>$CGI->form_action},id=>'process_form' ));
 	$form->appendChild( my $fs = dataElement( 'fieldset', undef, {class=>'input'} ));
 	$fs->appendChild( dataElement( 'legend', $CGI->msg( 'import.queryall.legend' )));
 	$fs->appendChild( my $table = dataElement( 'table', undef, {class=>'input'} ));
 	#$table->appendChild( my $tr = dataElement( 'tr', undef, {class=>'input'} ));
+
 	my $i = 0;
 	foreach my $url (@base_urls) {
 		my $id = "base_url".$i++;
@@ -166,12 +188,12 @@ sub process_urls
 	my( $self, $body, $CGI, @base_urls ) = @_;
 	my $dbh = $self->dbh;
 
-	my $action = lc($CGI->param( 'action' ) || '');
-
 	my @ignore = $CGI->param( 'ignore' );
 	my @failed = $CGI->param( 'failed' );
 	my @added = $CGI->param( 'added' );
 	my @unknown;
+
+	$self->onload( 'processUrls();' );
 
 	# First request has checkboxes!
 	if( defined(my $c = $CGI->param('base_url_count')) ) {
@@ -180,6 +202,8 @@ sub process_urls
 				if defined($CGI->param( 'base_url' . $_ ) and $CGI->param( 'base_url' . $_ ) eq 'yes' );
 		}
 	}
+
+	$body->appendChild( dataElement( 'pre', undef, {id=>'debug'}));
 
 	$body->appendChild( $self->help( $CGI->msg( 'import.check.help' )));
 
@@ -201,51 +225,18 @@ sub process_urls
 		}
 	}
 
-	my $stime = time();
-	while( my $url = shift @unknown )
-	{
-		my $ha = HTTP::OAI::Harvester->new( baseURL => $url );
-		$ha->agent( $dbh->adminEmail );
-		$ha->timeout( 30 );
-		my $id = $ha->Identify();
-		
-		if( $id->is_success ) {
-			push @added, $url;
-			$repos{$url} = ADDED;
-			$self->_add_repository($url, $id);
-		} else {
-			push @failed, $url;
-			$repos{$url} = FAILED;
-		}
-
-		# Stop if we took more than 60 seconds
-		last if (time() - $stime) > 60;
-	}
-
-	$body->appendChild( my $form = dataElement( 'form', undef, {method=>'post', action=>$CGI->form_action} ));
+	$body->appendChild( my $form = dataElement( 'form', undef, {method=>'post', action=>$CGI->form_action, id=>'base_url_form'} ));
 	$form->appendChild( my $fs = dataElement( 'fieldset', undef, {class=>'input'} ));
 	$fs->appendChild( dataElement( 'legend', $CGI->msg( 'import.check.legend' )));
 	$fs->appendChild( my $table = dataElement( 'table', undef, {class=>'input'} ));
 	foreach my $url (@unknown,@added,@failed) {
 		$table->appendChild( my $tr = dataElement( 'tr', undef, {class=>'input'} ));
-		$tr->appendChild( dataElement( 'td', dataElement( 'tt', $url ), {class=>'input'}));
+		$tr->appendChild( dataElement( 'td', urlElement( $url ), {class=>'input'}));
 		$tr->appendChild( dataElement( 'input', undef, {type=>'hidden',name=>'base_url',value=>$url} ));
-		if( $repos{$url} == ADDED ) {
-			$tr->appendChild( dataElement( 'input', undef, {type=>'hidden',name=>'added',value=>$url} ));
-			$tr->appendChild( dataElement( 'td', chr(0x2713), {class=>'state passed'} ));
-		} elsif( $repos{$url} == FAILED ) {
-			$tr->appendChild( dataElement( 'input', undef, {type=>'hidden',name=>'failed',value=>$url} ));
-			$tr->appendChild( dataElement( 'td', chr(0x2717), {class=>'state failed'} ));
-		} else {
-			$tr->appendChild( dataElement( 'td', '?', {class=>'state unknown'} ));
-		}
+		$tr->appendChild( dataElement( 'td', '?', {id=>$url,class=>'state unknown'} ));
 	}
 
-	if( @unknown > 0 ) {
-		$fs->appendChild( dataElement( 'input', undef, {type=>'submit',name=>'submit',value=>$CGI->msg( 'import.add.submit' )} ));
-	} else {
-		$fs->appendChild( dataElement( 'p', $CGI->msg('import.done') ));
-	}
+	$fs->appendChild( dataElement( 'p', $CGI->msg('import.done'), {id=>'done_message', style=>'display: none;'} ));
 }
 
 sub _add_repository
@@ -268,6 +259,38 @@ sub _add_repository
 	});
 
 	return $dbh->addRepository( $repo );
+}
+
+sub _ajax
+{
+	my( $self, $CGI ) = @_;
+	my $dbh = $self->dbh;
+
+	unless( $CGI->authorised ) {
+		warn "Error: Unauthorised AJAX request";
+		return;
+	}
+
+	$CGI->content_type( 'text/plain' );
+
+	my $url = $CGI->param( 'base_url' ) or return;
+	my $base_url = URI->new($url);
+	$base_url->query( undef );
+
+	my $ha = HTTP::OAI::Harvester->new( baseURL => $base_url );
+	$ha->agent( $dbh->adminEmail );
+	$ha->timeout( 30 );
+	my $id = $ha->Identify();
+	
+	my $success = 0;
+	if( $id->is_success ) {
+		$success = 1;
+		$self->_add_repository($url, $id);
+	}
+
+	print join(" ", $url, $success);
+
+	return undef;
 }
 
 1;

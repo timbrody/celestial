@@ -90,7 +90,7 @@ sub page
 			$r,
 			repository => $repo,
 			metadataFormat => $mdf,
-			baseURL => $CGI->as_link( 'oai' ) . '/' . uri_escape_utf8( $source ),
+			baseURL => $CGI->absolute_link( $CGI->as_link( 'oai' ) . '/' . uri_escape_utf8( $source )),
 			args => \%vars,
 		);
 	}

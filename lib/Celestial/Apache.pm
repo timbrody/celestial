@@ -17,9 +17,12 @@ use Celestial::DBI;
 
 use Apache2;
 use APR::Table;
-use Apache::Access;
+use Apache::RequestIO; # Supplies $r->read
 use Apache::Connection;
+use Apache::RequestRec;
+#use Apache::Access;
 use Apache::Const qw( OK );
+#use Apache::Filter;
 
 #$SIG{__DIE__} = sub {
 #	print CGI::header( 'text/html' );
@@ -31,6 +34,12 @@ use Apache::Const qw( OK );
 #	print CGI::p(CGI::pre(Carp::longmess));
 #	print CGI::end_html();
 #	exit(0);
+#};
+
+#$SIG{__DIE__} = $SIG{__WARN__} = sub {
+#	print STDERR join "\n",
+#		@_,
+#		Carp::longmess;
 #};
 
 use Celestial::Handler;
@@ -64,7 +73,9 @@ sub handler
 
 	my $cgi;
 	{
-		my $url = URI->new(CGI::self_url());
+		my $q = CGI->new;
+
+		my $url = URI->new($q->self_url());
 			$url->query(undef);
 			$url = $url->path;
 		my $script_path = $SETTINGS->{ paths }->{ script };
@@ -78,19 +89,20 @@ sub handler
 			substr($url,length($script_path));
 #warn "url = $url, script = $script_path, section = $section, path = $section_path";
 
-		my $action = CGI::param('action') || '';
+		my $action = $q->param('action') || '';
 		my $referer = $r->headers_in->{ 'Referer' };
 
 		$cgi = Celestial::CGI->new(
+				cgi => $q,
 				status => OK,
 				request => $r,
 				section => $section,
 				action => $action,
 				user => $r->user,
 				authorised => $r->user,
-				base_url => URI->new(CGI::url()),
-				form_action => URI->new(CGI::url()),
-				url => URI->new(CGI::self_url()),
+				base_url => URI->new($q->url()),
+				form_action => URI->new($q->url()),
+				url => URI->new($q->self_url()),
 				script_path => $script_path,
 				section_path => $section_path,
 				hostname => $r->hostname,
@@ -189,7 +201,7 @@ sub load_phrases
 
 sub form_action {
 	my $self = shift;
-	return $self->base_url($self->section);
+	return $self->as_link($self->section);
 }
 
 sub as_link {
@@ -198,6 +210,11 @@ sub as_link {
 	my $url = URI->new( $self->script_path . '/' . $section, 'http' );
 	$url->query_form( @args );
 	return $url;
+}
+
+sub absolute_link {
+	my $self = shift;
+	return URI->new_abs(shift, $self->url);
 }
 
 sub msg {
@@ -227,8 +244,7 @@ sub datestamp {
 }
 
 sub param {
-	shift;
-	CGI::param( @_ );
+	shift->cgi->param( @_ );
 }
 
 sub redirect {
