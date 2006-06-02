@@ -53,7 +53,7 @@ my $build = $class->new(
 	requires => {
 		'HTTP::OAI::Harvester' => '3.17',
 		'URI::Find' => '0.1',
-		'CGI' => '3.06',
+		'CGI' => '3.05',
 	},
 	install_path => {
 		conf => '/etc/celestial',
