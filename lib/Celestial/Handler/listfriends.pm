@@ -9,8 +9,6 @@ use vars qw( @ISA );
 
 push @ORDER, 'listfriends';
 
-use URI::Escape qw/uri_escape_utf8/;
-
 sub page
 {
 	my( $self, $CGI ) = @_;
@@ -23,7 +21,7 @@ sub page
 	my $mirror = $CGI->url->clone;
 	foreach my $repo ($dbh->listRepositories) {
 		$c++;
-		$mirror->path($CGI->as_link( 'oai' ) . '/' . uri_escape_utf8($repo->identifier));
+		$mirror->path($CGI->as_link( 'oai' ) . '/' . $CGI->uri_escape($repo->identifier));
 		$root->appendChild( dataElement( 'baseURL', $repo->baseURL, {
 			id => $repo->identifier,
 			mirror => $mirror,

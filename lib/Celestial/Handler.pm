@@ -122,7 +122,8 @@ sub abbr_url {
 sub urlElement
 {
 	my $url = shift;
-	return dataElement( 'a', dataElement( 'tt', abbr_url($url,shift) ), {href=>$url});
+	my $text = Celestial::CGI::uri_unescape(abbr_url($url,shift));
+	return dataElement( 'a', dataElement( 'tt', $text), {href=>$url});
 }
 
 sub tableRowElement

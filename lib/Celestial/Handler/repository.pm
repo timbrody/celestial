@@ -6,6 +6,7 @@ use warnings;
 use Celestial::Handler;
 use vars qw( @ISA );
 @ISA = qw( Celestial::Handler );
+use URI::Escape qw(uri_escape_utf8);
 
 push @ORDER, 'repository';
 
@@ -46,7 +47,7 @@ sub body {
 sub _oai_links {
 	my( $self, $body, $CGI, $repo ) = @_;
 
-	my $baseurl = $CGI->as_link('oai/' . $repo->identifier);
+	my $baseurl = URI->new($CGI->as_link('oai') . '/' . uri_escape_utf8($repo->identifier), 'http');
 
 	$body->appendChild( my $table = dataElement( 'table' ));
 	$table->appendChild( dataElement( 'caption', $CGI->msg( 'repository.oai' )));

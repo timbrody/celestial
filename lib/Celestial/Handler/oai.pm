@@ -2,6 +2,7 @@ package Celestial::Handler::oai;
 
 use strict;
 use warnings;
+use encoding 'utf8';
 
 use Celestial::Handler;
 
@@ -12,7 +13,6 @@ push @ORDER, 'oai';
 
 #use CGI qw/:standard -oldstyle_urls/;
 #$CGI::USE_PARAM_SEMICOLONS = 0; # We really, really want ampersands
-use URI::Escape qw/uri_escape_utf8 uri_unescape/;
 use HTML::Entities;
 use XML::LibXML;
 use Encode;
@@ -32,12 +32,12 @@ sub page
 	$u = URI->new( $u );
 	my %vars = $u->query_form;
 	for(values %vars) { # Ordinarily param() would unescape
-		$_ = uri_unescape($_);
+		$_ = $CGI->uri_unescape($_);
 	}
 
 	if( $source ) {
 		$source =~ s/^\///;
-		$source = uri_unescape($source);
+		$source = $CGI->uri_unescape($source);
 		my $repoid = $dbh->getRepositoryId($source);
 		$repo = $dbh->getRepository($repoid) if defined($repoid);
 	}
@@ -90,12 +90,13 @@ sub page
 			$r,
 			repository => $repo,
 			metadataFormat => $mdf,
-			baseURL => $CGI->absolute_link( $CGI->as_link( 'oai' ) . '/' . uri_escape_utf8( $source )),
+			baseURL => $CGI->absolute_link( $CGI->as_link( 'oai' ) . '/' . $CGI->uri_escape( $source )),
 			args => \%vars,
 		);
 	}
 
 	$CGI->content_type( 'text/xml; charset=utf-8' );
+	binmode(STDOUT,":raw"); # toFH prints in binary
 	$r->toDOM()->toFH(\*STDOUT,1);
 
 	return undef;
@@ -248,8 +249,6 @@ sub ListIdentifiers {
 			last;
 		}
 
-		utf8::decode($header);
-
 		$r->identifier(new HTTP::OAI::Header(dom=>$parser->parse_string($header)));
 	}
 
@@ -389,10 +388,6 @@ sub ListRecords {
 			last;
 		}
 
-		utf8::decode($header);
-		utf8::decode($metadata);
-		utf8::decode($about);
-
 		$r->record(my $record = new HTTP::OAI::Record(
 			version=>2.0,
 			header=>HTTP::OAI::Header->new(dom=>$parser->parse_string($header))
@@ -446,8 +441,6 @@ sub ListSets {
 
 	my ($id,$setSpec,$setName);
 	$sth->bind_columns(\$id,\$setSpec,\$setName);
-	utf8::decode($setSpec);
-	utf8::decode($setName);
 	while( $sth->fetch ) {
 		$r->set(HTTP::OAI::Set->new(
 			setSpec=>$setSpec,
@@ -470,11 +463,11 @@ sub datestamp {
 }
 
 sub encodeToken {
-	return join '!', map { uri_escape_utf8(($_||''),"^A-Za-z0-9") } @_;
+	return join '!', map { Celestial::CGI::uri_escape(($_||''),"^A-Za-z0-9") } @_;
 }
 
 sub decodeToken {
-	return map { uri_unescape($_) } split /!/, $_[0];
+	return map { Celestial::CGI::uri_unescape($_) } split /!/, $_[0];
 }
 
 1;

@@ -2,6 +2,7 @@ package Celestial::Apache;
 
 use strict;
 use warnings;
+use encoding 'utf8'; # Byte strings are also utf8
 
 use Celestial::Config; # Exports $SETTINGS
 
@@ -155,6 +156,7 @@ sub handler
 
 	if( $page ) {
 		$r->content_type( "text/html; charset: utf-8" );
+		binmode(STDOUT,":raw"); # toFH already converts utf8 to bytes
 		$dom->toFH(\*STDOUT,1);
 	}
 
@@ -168,7 +170,12 @@ use Celestial::Config; # Exports $SETTINGS
 use YAML;
 use vars qw( $AUTOLOAD );
 use Apache::Const qw( REDIRECT NOT_FOUND );
-use URI::Escape qw( uri_unescape );
+use URI::Escape qw();
+
+use vars qw( @ISA @EXPORT @EXPORT_OK );
+use Exporter;
+@ISA = qw( Exporter );
+@EXPORT = qw( uri_escape uri_unescape );
 
 sub new {
 	my( $class, %opts ) = @_;
@@ -243,6 +250,18 @@ sub datestamp {
 	}
 }
 
+sub uri_escape {
+	my $str = @_ == 1 ? shift : $_[1];
+	return URI::Escape::uri_escape_utf8($str);
+}
+
+sub uri_unescape {
+	my $str = @_ == 1 ? shift : $_[1];
+	$str =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+	utf8::decode($str); # utf8 bytes => utf8 chars
+	return $str;
+}
+
 sub param {
 	shift->cgi->param( @_ );
 }
@@ -291,7 +310,9 @@ sub get_cookie {
 	return unless @jar % 2 == 0;
 	my %cookies = @jar;
 
-	return uri_unescape($cookies{ $name });
+	return exists($cookies{ $name }) ?
+		uri_unescape($cookies{ $name }) :
+		undef;
 }
 
 package Celestial::Auth;

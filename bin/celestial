@@ -63,6 +63,7 @@ use Carp;
 
 use strict;
 use warnings;
+use encoding 'utf8';
 
 binmode(STDOUT,":utf8");
 
@@ -278,7 +279,7 @@ sub update_repository {
 
 # warn $repo->identifier .": Protocol version " . $ha->repository->version . "\n";
 
-	$repo->identify( $identify->toDOM->toString );
+	$repo->Identify( $identify->toDOM->toString );
 	$repo->commit;
 
 	my $ls = $ha->ListSets();

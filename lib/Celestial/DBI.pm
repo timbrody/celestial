@@ -51,6 +51,7 @@ There is no facility for removing single records, instead you should addRecord w
 
 use strict;
 use warnings;
+use encoding 'utf8';
 
 use Celestial::Config;
 
@@ -489,13 +490,6 @@ sub addRepository($$) {
 	return $repo;
 }
 
-sub updateIdentify_old {
-	my ($self,$repo,$Identify) = @_;
-	my $sth = $self->prepare("UPDATE Repositories SET Identify=? WHERE id=?");
-	$sth->execute($Identify,$repo->id);
-	$sth->finish;
-}
-
 sub listMetadataFormats {
 	my ($self, $repo) = @_;
 	my $cols = join(',',
@@ -564,6 +558,7 @@ Where $repo isa L<Celestial::Repository> and $mdf isa L<HTTP::OAI::MetadataForma
 sub addMetadataFormat {
 	my ($self, $repo, $mdf) = @_;
 	if( defined(my $omdf = $repo->getMetadataFormat( $mdf->metadataPrefix )) ) {
+		$omdf->create_tables; # Make sure tables have been created
 		return $omdf;
 	}
 	my $sth = $self->prepare("REPLACE MetadataFormats (`id`,`repository`,`metadataPrefix`,`schema`,`metadataNamespace`) VALUES (?,?,?,?,?)");
@@ -575,7 +570,7 @@ sub addMetadataFormat {
 		$mdf->metadataNamespace
 	) or Carp::confess("MySQL Error: $!");
 	my $id = $sth->{'mysql_insertid'};
-	$mdf = $repo->getMetadataFormat( $id );
+	$mdf = $repo->getMetadataFormat( $mdf->metadataPrefix );
 
 	# Create auxillary tables
 	$mdf->create_tables;
@@ -950,14 +945,19 @@ package Celestial::Encapsulation;
 
 use Carp qw( confess );
 use vars qw($AUTOLOAD);
+use encoding 'utf8';
 
 sub new {
 	my $class = shift;
 	if( @_ == 1 and ref($_[0]) eq 'HASH' ) {
-		for(values %{$_[0]}) {
-			utf8::decode($_) if defined($_);
+		foreach(values %{$_[0]}) {
+			utf8::decode($_); # Decode utf8 from the databsae
 		}
 		return bless({_elem => $_[0]}, $class);
+	} elsif( @_ % 2 == 0 ) {
+		my %self = @_;
+		$self{_elem} = {};
+		return bless(\%self, $class);
 	} else {
 		return bless({_elem => {}}, $class);
 	}
