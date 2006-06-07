@@ -232,6 +232,10 @@ sub msg {
 	return $phrase;
 }
 
+sub tick { chr(0x2713) }
+sub cross { chr(0x2717) }
+sub unknown { '?' }
+
 sub date {
 	my( $self, $ds ) = @_;
 	return '?' unless $ds;

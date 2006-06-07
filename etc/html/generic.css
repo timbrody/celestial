@@ -12,9 +12,9 @@ h1,h2,h3,h4 {
 	color: #208020;
 	background-color: #fff;
 }
-h1 { font-size: 18pt }
-
-h2,h3 { font-size: 11pt; }
+h1 { font-size: 150%; }
+h2,h3 { font-size: 110%; }
+h4 { font-size: 100%; }
 h2.nobreak,h3.nobreak { margin: 0px; }
 
 form { margin: 0px; display: inline; }
@@ -118,6 +118,7 @@ input.profile_button {
 }
 
 fieldset {
+	margin-top: 1em;
 	width: 35em;
 }
 fieldset.table {

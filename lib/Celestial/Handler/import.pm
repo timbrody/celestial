@@ -162,7 +162,7 @@ sub extract_urls {
 		$tr->appendChild( dataElement( 'td', dataElement( 'label', dataElement( 'tt', $url), {'for'=>$id} ), {class=>'input'} ));
 		if( $state{$url} == ADDED ) {
 			$tr->appendChild( dataElement( 'td', dataElement( 'input', undef, {type=>'checkbox', name=>'_base_url', id=>$id, value=>$url, checked=>'yes', disabled=>'yes'} ), {class=>'input'} ));
-			$tr->appendChild( dataElement( 'td', chr(0x2713), {class=>'state passed'} ));
+			$tr->appendChild( dataElement( 'td', $CGI->tick, {class=>'state passed'} ));
 		} else {
 			$tr->appendChild( dataElement( 'td', dataElement( 'input', undef, {type=>'checkbox', name=>$id, id=>$id, value=>$url, checked=>'yes'} ), {class=>'input'} ));
 			$tr->appendChild( dataElement( 'td', '?', {class=>'state unknown'} ));

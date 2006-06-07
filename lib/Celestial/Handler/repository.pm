@@ -31,7 +31,9 @@ sub body {
 
 	$self->_oai_links($body, $CGI, $repo);
 
-	$body->appendChild( dataElement( 'p' ));
+	$body->appendChild( dataElement( 'h3', $CGI->msg( 'repository.subtitle.status' ) ));
+
+	$self->_status($body, $CGI, $repo);
 
 	$self->_subscribe($body, $CGI, $repo);
 
@@ -58,17 +60,26 @@ sub _oai_links {
 		$tr->appendChild( dataElement( 'td', $verb ));
 		$tr->appendChild( dataElement( 'td', urlElement( $baseurl )));
 	}
-#	foreach my $mdf ($repo->listMetadataFormats) {
-#		foreach my $verb (qw(ListIdentifiers ListRecords)) {
-#			$baseurl->query_form(
-#				verb => $verb,
-#				metadataPrefix => $mdf->metadataPrefix
-#			);
-#			$table->appendChild( my $tr = dataElement( 'tr' ));
-#			$tr->appendChild( dataElement( 'td', $verb . '/' . $mdf->metadataPrefix ));
-#			$tr->appendChild( dataElement( 'td', urlElement( $baseurl )));
-#		}
-#	}
+}
+
+sub _status {
+	my( $self, $body, $CGI, $repo ) = @_;
+
+	my $ds = $repo->getLock;
+
+	$body->appendChild( my $table = dataElement( 'table' ));
+	$table->appendChild( my $tr = dataElement( 'tr' ));
+	$tr->appendChild( dataElement( 'td', $CGI->msg( 'repository.status.state' )));
+	if( !defined( $ds ) ) {
+		$tr->appendChild( dataElement( 'td', $CGI->tick, {class=>'state passed'}));
+	} elsif( $ds > 0 ) {
+		$tr->appendChild( dataElement( 'td', $CGI->unknown, {class=>'state unknown'}));
+		$table->appendChild( $tr = dataElement( 'tr' ));
+		$tr->appendChild( dataElement( 'td', $CGI->msg( 'repository.locked.since' )));
+		$tr->appendChild( dataElement( 'td', $CGI->datestamp( $ds )));
+	} else {
+		$tr->appendChild( dataElement( 'td', $CGI->cross, {class=>'state failed'}));
+	}
 }
 
 sub _subscribe {
@@ -134,7 +145,7 @@ sub _display {
 sub _can_edit {
 	my( $self, $body, $CGI, $repo ) = @_;
 
-	$body->appendChild( dataElement( 'h4', $CGI->msg( 'repository.subtitle.canedit' )));
+	$body->appendChild( dataElement( 'h3', $CGI->msg( 'repository.subtitle.canedit' )));
 
 	my $update;
 	my @fields = ();
@@ -170,12 +181,18 @@ sub _can_edit {
 sub _list_mdfs {
 	my( $self, $body, $CGI, $repo ) = @_;
 
-	$body->appendChild( dataElement( 'h4', $CGI->msg( 'repository.subtitle.mdfs' )));
+	$body->appendChild( dataElement( 'h3', $CGI->msg( 'repository.subtitle.mdfs' )));
 
 	foreach my $mdf ($repo->listMetadataFormats) {
 		my $tr;
+		$body->appendChild( dataElement( 'a', undef, {name=>$mdf->metadataPrefix} ));
 		$body->appendChild( my $fs = dataElement( 'fieldset' ));
 		$fs->appendChild( dataElement( 'legend', $mdf->metadataPrefix ));
+
+		if( $CGI->authorised ) {
+			$fs->appendChild( my $p = dataElement( 'p' ));
+			$self->_mdf_actions( $p, $CGI, $repo, $mdf );
+		}
 
 		$fs->appendChild( my $table = dataElement( 'table' ));
 		foreach my $field (qw( metadataNamespace schema )) {
@@ -201,6 +218,36 @@ sub _list_mdfs {
 		}
 	}
 
+}
+
+sub _mdf_actions {
+	my( $self, $body, $CGI, $repo, $mdf ) = @_;
+
+	return unless $CGI->authorised;
+
+	if( defined($CGI->param('metadataFormat')) and
+		$CGI->param('metadataFormat') == $mdf->id )
+	{
+		if( $CGI->action eq 'reharvest' ) {
+			$mdf->reset;
+		}
+		elsif( $CGI->action eq 'delete' ) {
+			$mdf->removeAllRecords;
+		}
+		elsif( $CGI->action eq 'lock' ) {
+			$mdf->lock;
+		}
+		elsif( $CGI->action eq 'unlock' ) {
+			$mdf->unlock;
+		}
+	}
+
+	my @actions = qw(reharvest delete);
+	push @actions, $mdf->locked ? 'unlock' : 'lock';
+	foreach(@actions) {
+		$body->appendChild( dataElement( 'a', $CGI->msg('repository.mdfs.'.$_), {href=>$CGI->as_link('repository', repository=>$repo->id, metadataFormat=>$mdf->id, action=>$_) . '#' . $mdf->metadataPrefix}));
+		$body->appendText( ' ' );
+	}
 }
 
 1;

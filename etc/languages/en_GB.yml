@@ -53,6 +53,13 @@ repository.subscribe: Subscribe
 repository.oai: Get metadata using OAI-PMH
 repository.subtitle.canedit: Edit Repository Settings
 repository.subtitle.mdfs: Supported Metadata Formats
+repository.subtitle.status: Repository Status
+repository.status.state: Repository locked state
+repository.locked.since: Harvest has been in progress since
+repository.mdfs.reharvest: Re-harvest all records
+repository.mdfs.delete: Delete all records
+repository.mdfs.lock: Stop harvesting
+repository.mdfs.unlock: Resume harvesting
 
 subscribe.subscribed: Reports will be sent to $1 every $2 days.
 subscribe.unsubscribed: Reports will no longer be sent to $1.

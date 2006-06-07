@@ -259,7 +259,7 @@ Returns the timestamp of the lock (if locked).
 sub getLock($$)
 {
 	my( $dbh, $repo ) = @_;
-	my $sth = $dbh->prepare("SELECT DATE_FORMAT(`timestamp`,$DATE_FORMAT) FROM Locks WHERE `repository`=?");
+	my $sth = $dbh->prepare("SELECT DATE_FORMAT(`timestamp`,'$DATE_FORMAT') FROM Locks WHERE `repository`=?");
 	$sth->execute($repo->id) or Carp::confess $!;
 	my ($ts) = $sth->fetchrow_array;
 	return $ts;
@@ -540,12 +540,14 @@ sub getMetadataFormat {
 
 sub updateMetadataFormat {
 	my ($self, $mdf) = @_;
-	$self->do("UPDATE MetadataFormats SET `metadataPrefix`=?, `schema`=?, `metadataNamespace`=? WHERE `id`=?",{},
-		$mdf->metadataPrefix,
-		$mdf->schema,
-		$mdf->metadataNamespace,
-		$mdf->id,
-	);
+	my @cols = (@Celestial::MetadataFormat::COLUMNS, @Celestial::MetadataFormat::DATE_COLUMNS);
+	$self->do("REPLACE MetadataFormats (" .
+		join(',',map({"`$_`"} @cols)) .
+		") VALUES (" .
+		join(',',map({'?'} @cols)) .
+		")",{},
+		map({ref($mdf->$_) ? $mdf->$_->id : $mdf->$_} @cols)
+	) or die $!;
 	return $mdf;
 }
 
@@ -1128,7 +1130,8 @@ sub unlock {
 }
 
 sub getLock {
-	shift->dbh->getLock(@_);
+	my $self = shift;
+	$self->dbh->getLock($self,@_);
 }
 
 sub addReport {
@@ -1302,7 +1305,7 @@ use vars qw(@ISA $TABLE_SCHEMA @COLUMNS @DATE_COLUMNS);
 @ISA = qw(Celestial::Encapsulation);
 
 @COLUMNS = qw( id repository metadataPrefix schema metadataNamespace lastToken cardinality );
-@DATE_COLUMNS = qw( lastHarvest lastFullHarvest lastAttempt lastFulltextHarvest );
+@DATE_COLUMNS = qw( locked lastHarvest lastFullHarvest lastAttempt lastFulltextHarvest );
 
 $TABLE_SCHEMA = <<EOS;
 (
@@ -1357,6 +1360,46 @@ sub remove
 	$dbh->do("DELETE FROM MetadataFormats WHERE `id`=?",{},$id);
 	$dbh->do("DELETE FROM harvestLog WHERE `metadataFormat`=?",{},$id);
 	$dbh->do("DROP TABLE IF EXISTS ".$self->table);
+}
+
+sub lock
+{
+	my( $self ) = @_;
+	$self->locked( $self->dbh->now );
+	$self->commit;
+}
+
+sub unlock
+{
+	my( $self ) = @_;
+	$self->locked( undef );
+	$self->commit;
+}
+
+sub reset
+{
+	my( $self ) = @_;
+	my $dbh = $self->dbh;
+	$self->removeAllErrors;
+	$self->lastHarvest(undef);
+	$self->lastFullHarvest(undef);
+	$self->lastToken(undef);
+	$self->commit;
+}
+
+sub removeAllRecords
+{
+	my( $self ) = @_;
+	$self->reset; # Force re-harvest of everything
+	$self->dbh->do("DELETE FROM ".$self->table)
+		or die $!;
+}
+
+sub removeAllErrors
+{
+	my( $self ) = @_;
+	my $dbh = $self->dbh;
+	$dbh->do("DELETE FROM harvestLog WHERE `metadataFormat`=?",{},$self->id);
 }
 
 =item $name = table([$name])
