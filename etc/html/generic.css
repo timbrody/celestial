@@ -188,17 +188,17 @@ td.state {
 }
 
 td.passed {
-	color: #080;
+	color: #040;
 	background-color: #8f8;
 }
 
 td.failed {
-	color: #800;
+	color: #400;
 	background-color: #f88;
 }
 
 td.unknown {
-	color: #888;
+	color: #444;
 	background-color: #ccc;
 }
 

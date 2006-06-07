@@ -200,6 +200,11 @@ sub _list_mdfs {
 		}
 		$table->appendChild( tableRowElement( $CGI->msg( 'mdf.lastharvest' ), $CGI->datestamp($mdf->lastHarvest) ));
 		$table->appendChild( tableRowElement( $CGI->msg( 'mdf.cardinality' ), $mdf->cardinality ));
+		if( $mdf->locked ) {
+			$table->appendChild( $tr = dataElement( 'tr' ));
+			$tr->appendChild( dataElement( 'td', $CGI->msg( 'mdf.locked' )));
+			$tr->appendChild( dataElement( 'td', $CGI->datestamp($mdf->locked), {class=>'state failed'} ));
+		}
 
 		$table = dataElement( 'table' );
 		my $c = 0;
@@ -207,7 +212,7 @@ sub _list_mdfs {
 		while( my $err = <$errs> ) {
 			last if ++$c == 5;
 			$table->appendChild( $tr = dataElement( 'tr' ));
-			$tr->appendChild( dataElement( 'td', $err->datestamp ));
+			$tr->appendChild( dataElement( 'td', $CGI->datestamp($err->datestamp) ));
 			$tr->appendChild( dataElement( 'td', dataElement( 'tt', dataElement( 'a', $err->url, { href=>$err->url } ))));
 			$table->appendChild( $tr = dataElement( 'tr' ));
 			$tr->appendChild( dataElement( 'td', dataElement( 'tt', $err->error), {colspan=>2} ));

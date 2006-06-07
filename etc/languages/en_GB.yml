@@ -31,6 +31,7 @@ mdf.schema: Metadata Schema
 mdf.metadatanamespace: Metadata Namespace
 mdf.lastharvest: Last Successful Harvest
 mdf.cardinality: Total Records
+mdf.locked: Locked Since
 
 mdf.error.title: Error Log
 

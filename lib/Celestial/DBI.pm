@@ -1390,6 +1390,7 @@ sub reset
 sub removeAllRecords
 {
 	my( $self ) = @_;
+	$self->cardinality(0);
 	$self->reset; # Force re-harvest of everything
 	$self->dbh->do("DELETE FROM ".$self->table)
 		or die $!;
