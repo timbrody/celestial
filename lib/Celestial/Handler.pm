@@ -165,10 +165,16 @@ sub formElement
 		$field->{ size } ||= 50;
 		my $label = delete($field->{ label }) || $CGI->msg( 'input.'.$name );
 		$table->appendChild(my $tr = dataElement('tr',undef,{class=>'input'}));
-		$tr->appendChild(my $td = dataElement('td',undef,{class=>'label'}));
-		$td->appendChild(dataElement('label',$label,{'for'=>$name}));
-		$tr->appendChild($td = dataElement('td',undef,{class=>'input'}));
-		$td->appendChild(dataElement('input',undef,{%$field,id=>$name}));
+		if( $field->{ type } eq 'checkbox' ) {
+			$tr->appendChild(my $td = dataElement('td',undef,{class=>'tickbox', colspan=>2}));
+			$td->appendChild(dataElement('input',undef,{%$field,id=>$name}));
+			$td->appendChild(dataElement('label',$label,{'for'=>$name}));
+		} else {
+			$tr->appendChild(my $td = dataElement('td',undef,{class=>'label'}));
+			$td->appendChild(dataElement('label',$label,{'for'=>$name}));
+			$tr->appendChild($td = dataElement('td',undef,{class=>'input'}));
+			$td->appendChild(dataElement('input',undef,{%$field,id=>$name}));
+		}
 	}
 
 	if( my $submit = $opts{ submit } ) {

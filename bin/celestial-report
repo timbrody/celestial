@@ -2,11 +2,11 @@
 
 =head1 NAME
 
-B<report> - generate and deliver all reports that are due
+B<celestial-report> - generate and deliver all reports that are due
 
 =head1 SYNOPSIS
 
-B<report> [B<options>]
+B<celestial-report> [B<options>]
 
 =head1 DESCRIPTION
 
@@ -41,24 +41,26 @@ use warnings;
 
 use POSIX qw/:sys_wait_h strftime/;
 
-use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $MAILHOST);
+use vars qw($VERSION $DEBUG $opt_identifier $GRANULARITY %SETTINGS $CGI);
 
+# Default settings
 $VERSION = '3.02';
-$HTTP_TIMEOUT = 300; # In seconds
-$MAILHOST = 'mail.ecs.soton.ac.uk';
 
 use Getopt::Long;
 use Pod::Usage;
+use Encode;
 
 use Celestial::DBI;
-use Date::Parse;
-use File::Temp;
+use Celestial::CGI;
 use Net::SMTP;
 
 use constant {
 	WITH_DAYS => 1,
 	WITH_SECONDS => 2
 };
+
+# Set up the environment
+$0 = "celestial-report";
 
 my( $opt_verbose, $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_dryrun );
 $opt_verbose = 0;
@@ -86,53 +88,56 @@ $DEBUG = $opt_verbose;
 
 my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 
-my $sth = $dbh->prepare("SELECT type,value FROM Configuration");
-$sth->execute;
-while( my ($type,$value) = $sth->fetchrow_array ) {
-	$ADMINEMAIL = $value if( $type eq 'adminEmail' );
-	$MAX_HARVESTERS = $value if( $type eq 'maxHarvesters' );
+foreach($dbh->listConfigs) {
+	$SETTINGS{ lc($_) } = $dbh->$_;
+}
+
+my $smtp = Net::SMTP->new( $SETTINGS{ 'mailhost' } || 'localhost' );
+
+$CGI = Celestial::CGI->new(
+	subscription => $Celestial::Config::SETTINGS->{ paths }->{ subscription },
+);
+
+my $sth = $dbh->prepare( "SELECT DISTINCT `email` FROM Reports WHERE `previous` is Null OR `previous` + INTERVAL `frequency` DAY < NOW()" );
+$sth->execute or die $!;
+
+my %REPO_CACHE;
+
+while(my ($email) = $sth->fetchrow_array ) {
+	my $s = $dbh->prepare( "SELECT `repository` FROM Reports WHERE `email`=? AND (`previous` is Null OR `previous` + INTERVAL `frequency` DAY < NOW())" );
+	$s->execute($email);
+	my $msg = '';
+	my @repos;
+	while(my ($repoid) = $s->fetchrow_array ) {
+		my $repo = $REPO_CACHE{$repoid} ||= $dbh->getRepository($repoid);
+		push @repos, $repo;
+		my $rep = $repo->getReport( $email );
+		$msg .= generate_report( $rep );
+		$rep->touch() unless $opt_dryrun;
+	}
+	$msg = "To: " . $email . "\n" .
+		"Subject: " . $CGI->msg( 'report.subject', $SETTINGS{'repositoryname'} ) . "\n\n" .
+		$CGI->msg( 'report.header',
+			$email,
+			join('',map({ $_->identifier . "\n" } @repos)),
+			$CGI->subscription . "?email=" . $CGI->uri_escape($email)
+		) . "\n" .
+		$msg .
+		$CGI->msg( 'report.footer', $SETTINGS{'adminemail'} );
+		
+	if( $opt_dryrun ) {
+		print $msg;
+	} else {
+		$smtp->mail( $SETTINGS{ adminemail } );
+		$smtp->to( $email );
+		$smtp->data( encode("iso-8859-1", $msg) );
+	}
 }
 $sth->finish;
 
-# Set up the environment
-$0 = "celestial-report";
-
-# Current number of active harvesters
-my $c = 0;
-
-my @REPOS = $dbh->listRepositories();
-
-if( $opt_list ) {
-	print "id\tidentifier\n";
-	for (sort { $a->id <=> $b->id } @REPOS) {
-		printf("%d\t%s\t%s\n", $_->id, $_->identifier, $_->baseURL);
-	}
-	exit(0);
-}
-
-my $smtp = Net::SMTP->new( $MAILHOST );
-
-foreach my $repo (@REPOS)
-{
-	foreach my $rep (grep { $_->isDue } $repo->listReports) {
-		my $msg = generate_report($rep);
-		$msg = "To: " . $rep->email . "\n" .
-			"Subject: Celestial Report for " . $repo->identifier . "\n\n" .
-			$msg;
-		if( $opt_dryrun ) {
-			print $msg;
-			next;
-		}
-		$smtp->mail( $ADMINEMAIL );
-		$smtp->to( $rep->email );
-		$smtp->data($msg);
-		$rep->touch();
-	}
-}
+$dbh->disconnect;
 
 $smtp->quit;
-
-$dbh->disconnect;
 
 sub generate_report
 {
@@ -140,36 +145,38 @@ sub generate_report
 	my $dbh = $rep->dbh;
 	my $repo = $rep->repository;
 
-	my $str = "Celestial report for: " . $repo->identifier . "\n";
-	$str .= "OAI Base URL: <" . $repo->baseURL . ">\n\n";
+	my $str = $CGI->msg( 'report.repository.header', $repo->identifier, $repo->baseURL ) . "\n";
 
-	$str .= "This report covers the period" .
-		($rep->previous ? " " . $rep->previous : "") .
-		" to " . $dbh->now() . ".\n\n";
+	$str .= $rep->previous ?
+		$CGI->msg( 'report.period', $CGI->datestamp($rep->previous), $CGI->datestamp($dbh->now()) ) :
+		$CGI->msg( 'report.periodto', $CGI->datestamp($dbh->now()) );
+	$str .= "\n\n";
 
-	$str .= "Metadata Formats Harvested\n\n";
+	$str .= $CGI->msg( 'report.heading.mdfs' ) . "\n";
 	foreach my $mdf ($repo->listMetadataFormats) {
-		$str .= $mdf->metadataPrefix . ":\n";
-		$str .= "Most recent attempted harvest: " . ($mdf->lastAttempt||'never') . "\n";
-		$str .= "Most recent successful harvest: " . ($mdf->lastHarvest||'never') . "\n";
+		$str .= $CGI->msg( 'report.mdf.heading', $mdf->metadataPrefix) . "\n";
+		$str .= $CGI->msg( 'report.mdf.attempt', $CGI->datestamp($mdf->lastAttempt)) . "\n";
+		$str .= $CGI->msg( 'report.mdf.successful', $CGI->datestamp($mdf->lastHarvest)) . "\n";
 	}
 	$str .= "\n";
 
 	# Errors
 	my %errs = $rep->errorsReport;
-	$str .= %errs ?
-		"Errors Encountered\n\n" :
-		"No errors encountered in period.\n";
-	foreach my $mdp (sort { $a cmp $b } keys %errs ) {
-		foreach my $err (@{$errs{$mdp}}) {
-			$str .= sprintf("\t%s\t%s\n", $mdp, $err);
+	if( %errs ) {
+		$str .= $CGI->msg( 'report.errors.heading' ) . "\n";
+		foreach my $mdp (sort { $a cmp $b } keys %errs ) {
+			foreach my $err (@{$errs{$mdp}}) {
+				$str .= sprintf("\t%s\t%s\n", $mdp, $err);
+			}
 		}
+		$str .= "\n";
+	} else {
+		$str .= $CGI->msg( 'report.errors.none' ) . "\n\n";
 	}
-	$str .= "\n";
 
 	# Records
 	my %recs = $rep->recordsReport;
-	$str .= "New Metadata Records\n\n";
+	$str .= $CGI->msg( 'report.heading.records' ) . "\n\n";
 	foreach my $mdp (sort { $a cmp $b } keys %recs) {
 		$str .= sprintf("\t%d\t%s\n", $recs{$mdp}, $mdp);
 	}
@@ -177,13 +184,15 @@ sub generate_report
 
 	# Fulltexts
 	my %fts = $rep->fulltextsReport;
-	$str .= %fts ?
-		"Full-text Formats Identified\n\n" :
-		"No full-texts identified in period.\n";
-	foreach my $fmt (sort { $a cmp $b } keys %fts) {
-		$str .= sprintf("\t%d\t%s\n", $fts{$fmt}, $fmt);
+	if( %fts ) {
+		$str .= $CGI->msg( 'report.heading.fulltext' );
+		foreach my $fmt (sort { $a cmp $b } keys %fts) {
+			$str .= sprintf("\t%d\t%s\n", $fts{$fmt}, $fmt);
+		}
+		$str .= "\n";
+	} else {
+		$str .= $CGI->msg( 'report.fulltext.none' );
 	}
-	$str .= "\n";
 
 	return $str;
 }

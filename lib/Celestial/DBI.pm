@@ -300,7 +300,7 @@ sub cardinality {
 }
 
 sub listConfigs {
-	return qw( adminEmail repositoryName maxHarvesters );
+	return qw( adminEmail repositoryName maxHarvesters mailHost );
 }
 
 sub _config {
@@ -614,7 +614,7 @@ sub listReportsByEmail {
 	my( $dbh, $email ) = @_;
 	my $cols = join(',',
 		map({ "`$_`" } @Celestial::Report::COLUMNS),
-		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT')" } @Celestial::Report::DATE_COLUMNS));
+		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::Report::DATE_COLUMNS));
 	
 	my $sth = $dbh->prepare( "SELECT $cols FROM Reports WHERE `email`=?" );
 	$sth->execute( $email ) or Carp::confess $!;
@@ -732,7 +732,7 @@ sub addError {
 sub listErrors($$)
 {
 	my( $dbh, $mdf ) = @_;
-	my $sth = $dbh->prepare("SELECT *,DATE_FORMAT(`datestamp`,'$DATE_FORMAT') AS datestamp FROM harvestLog WHERE `metadataFormat`=?");
+	my $sth = $dbh->prepare("SELECT *,DATE_FORMAT(`datestamp`,'$DATE_FORMAT') AS `datestamp` FROM harvestLog WHERE `metadataFormat`=?");
 	$sth->execute($mdf->id) or Carp::confess $!;
 	return Celestial::Error->new({
 		dbh=>$dbh,
@@ -1602,7 +1602,7 @@ sub removeReport
 sub getReport
 {
 	my( $self, $dbh, $repo, $email ) = @_;
-	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).",DATE_FORMAT(previous,'$Celestial::DBI::DATE_FORMAT') AS previous FROM Reports WHERE repository=? AND email=?");
+	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).",DATE_FORMAT(`previous`,'$Celestial::DBI::DATE_FORMAT') AS previous FROM Reports WHERE `repository`=? AND `email`=?");
 	$sth->execute($repo->id,$email) or Carp::confess($!);
 	my $row = $sth->fetchrow_hashref or return;
 	$sth->finish;
@@ -1617,7 +1617,7 @@ sub listReports
 {
 	my( $self, $dbh, $repo ) = @_;
 	my @reps;
-	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).',DATE_FORMAT(previous,"%Y%m%d%H%i%s") AS previous FROM Reports WHERE repository=?');
+	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).",DATE_FORMAT(`previous`,'$Celestial::DBI::DATE_FORMAT') AS previous FROM Reports WHERE `repository`=?");
 	$sth->execute($repo->id) or Carp::confess($!);
 	while( my $row = $sth->fetchrow_hashref ) 
 	{
@@ -1684,7 +1684,12 @@ sub recordsReport
 	my $from = $self->previous || 0;
 	foreach my $mdf ($repo->listMetadataFormats)
 	{
-		my $sth = $dbh->prepare("SELECT COUNT(*) FROM ".$mdf->table." WHERE datestamp>=?");
+		# We already have a record count
+		if( $from == 0 ) {
+			$recs{$mdf->metadataPrefix} = $mdf->cardinality;
+			next;
+		}
+		my $sth = $dbh->prepare("SELECT COUNT(*) FROM ".$mdf->table." WHERE `datestamp`>=?");
 		$sth->execute($from) or Carp::confess($!);
 		my $row = $sth->fetchrow_arrayref;
 		$recs{$mdf->metadataPrefix} = $row->[0];
@@ -1702,7 +1707,7 @@ sub errorsReport
 	my $from = $self->previous || 0;
 	foreach my $mdf ($repo->listMetadataFormats)
 	{
-		my $sth = $dbh->prepare("SELECT CONCAT_WS(' ',datestamp,error) FROM harvestLog WHERE id=? AND datestamp>=?");
+		my $sth = $dbh->prepare("SELECT CONCAT_WS(' ',`datestamp`,`error`) FROM harvestLog WHERE `metadataFormat`=? AND `datestamp`>=?");
 		$sth->execute($mdf->id, $from) or Carp::confess($!);
 		while( my $row = $sth->fetchrow_arrayref )
 		{
@@ -1722,7 +1727,7 @@ sub fulltextsReport
 	my $from = $self->previous || 0;
 	my $mdf = $repo->getMetadataFormat('oai_dc') or return;
 	my $ftt = $mdf->getFulltext or return;
-	my $sth = $dbh->prepare("SELECT format,COUNT(*) FROM ".$ftt->table." WHERE datestamp>=? GROUP BY format");
+	my $sth = $dbh->prepare("SELECT `format`,COUNT(*) FROM ".$ftt->table." WHERE `datestamp`>=? GROUP BY `format`");
 	$sth->execute($from) or Carp::confess($!);
 	while( my $row = $sth->fetchrow_arrayref )
 	{

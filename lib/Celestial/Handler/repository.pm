@@ -21,9 +21,21 @@ sub body {
 	my $dom = $self->dom;
 
 	my $repoid = $CGI->param( 'repository' );
-	return $self->error( $CGI->msg( 'error.norepository' )) unless defined($repoid);
+	return $self->error( $CGI, $CGI->msg( 'error.norepository' )) unless defined($repoid);
 	my $repo = $dbh->getRepository( $repoid );
-	return $self->error( $CGI->msg( 'error.nosuchrepository' )) unless defined($repo);
+	return $self->error( $CGI, $CGI->msg( 'error.nosuchrepository', $repoid )) unless defined($repo);
+
+	# We need to do this first, to generate the nosuchrepository error
+	if( $CGI->authorised and
+		!defined($CGI->param('metadataFormat')) and
+		$CGI->action eq 'remove' and
+		$CGI->param('confirm') and
+		$CGI->param('confirm') eq 'yes'
+	)
+	{
+		$repo->remove;
+		return $self->error( $CGI, $CGI->msg( 'error.nosuchrepository', $repoid ));
+	}
 
 	my $body = $dom->createElement( 'div' );
 
@@ -145,7 +157,26 @@ sub _display {
 sub _can_edit {
 	my( $self, $body, $CGI, $repo ) = @_;
 
+	return unless $CGI->authorised;
+
 	$body->appendChild( dataElement( 'h3', $CGI->msg( 'repository.subtitle.canedit' )));
+
+	$body->appendChild( formElement($CGI,
+		legend => $CGI->msg( 'repository.remove.legend' ),
+		hidden => {
+			repository => $repo->id,
+			action => 'remove',
+		},
+		fields => [{
+#			label => $CGI->msg( 'repository.remove.confirm' ),
+			type => 'checkbox',
+			name => 'confirm',
+			value => 'yes',
+		}],
+		submit => {
+			value => $CGI->msg( 'repository.remove.submit' )
+		}
+	));
 
 	my $update;
 	my @fields = ();
