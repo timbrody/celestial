@@ -165,7 +165,7 @@ sub extract_urls {
 			$tr->appendChild( dataElement( 'td', $CGI->tick, {class=>'state passed'} ));
 		} else {
 			$tr->appendChild( dataElement( 'td', dataElement( 'input', undef, {type=>'checkbox', name=>$id, id=>$id, value=>$url, checked=>'yes'} ), {class=>'input'} ));
-			$tr->appendChild( dataElement( 'td', '?', {class=>'state unknown'} ));
+			$tr->appendChild( dataElement( 'td', $CGI->unknown, {class=>'state unknown'} ));
 		}
 	}
 	$fs->appendChild( dataElement( 'input', undef, {type=>'hidden', name=>'base_url_count', value=>$i} ));
@@ -189,9 +189,6 @@ sub process_urls
 	my $dbh = $self->dbh;
 
 	my @ignore = $CGI->param( 'ignore' );
-	my @failed = $CGI->param( 'failed' );
-	my @added = $CGI->param( 'added' );
-	my @unknown;
 
 	$self->onload( 'processUrls();' );
 
@@ -212,28 +209,18 @@ sub process_urls
 		@base_urls = grep { $_ ne $url } @base_urls;
 	}
 
-	my %repos;
-	foreach my $url (@base_urls)
-	{
-		if( grep { $_ eq $url } @added ) {
-			$repos{$url} = ADDED;
-		} elsif( grep { $_ eq $url } @failed ) {
-			$repos{$url} = FAILED;
-		} else {
-			$repos{$url} = UNKNOWN;
-			push @unknown, $url;
-		}
-	}
-
 	$body->appendChild( my $form = dataElement( 'form', undef, {method=>'post', action=>$CGI->form_action, id=>'base_url_form'} ));
 	$form->appendChild( my $fs = dataElement( 'fieldset', undef, {class=>'input'} ));
+	foreach(qw(tick cross unknown)) {
+		$fs->appendChild( dataElement( 'input', undef, {type=>'hidden',name=>"language.$_",id=>"language.$_",value=>$CGI->$_} ));
+	}
 	$fs->appendChild( dataElement( 'legend', $CGI->msg( 'import.check.legend' )));
 	$fs->appendChild( my $table = dataElement( 'table', undef, {class=>'input'} ));
-	foreach my $url (@unknown,@added,@failed) {
+	foreach my $url (@base_urls) {
 		$table->appendChild( my $tr = dataElement( 'tr', undef, {class=>'input'} ));
 		$tr->appendChild( dataElement( 'td', urlElement( $url ), {class=>'input'}));
 		$tr->appendChild( dataElement( 'input', undef, {type=>'hidden',name=>'base_url',value=>$url} ));
-		$tr->appendChild( dataElement( 'td', '?', {id=>$url,class=>'state unknown'} ));
+		$tr->appendChild( dataElement( 'td', $CGI->unknown, {id=>$url,class=>'state unknown'} ));
 	}
 
 	$fs->appendChild( dataElement( 'p', $CGI->msg('import.done'), {id=>'done_message', style=>'display: none;'} ));
@@ -251,11 +238,11 @@ sub _add_repository
 
 	return if defined($dbh->getRepositoryBaseURL( $url ));
 	my $repo = Celestial::Repository->new(
+		dbh=>$dbh,
 		id => undef,
 		identifier => $name,
 		baseURL => $url,
 		Identify => $identify->toDOM->toString,
-		dbh=>$dbh,
 	);
 
 	return $dbh->addRepository( $repo );

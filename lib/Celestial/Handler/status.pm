@@ -42,21 +42,26 @@ sub body {
 		$c++;
 		my @mdfs = $repo->listMetadataFormats;
 		my $edit_url = $CGI->as_link('repository',repository=>$repo->id);
-		my $row;
-		foreach my $mdf (@mdfs) {
-			my $ds = $mdf->lastHarvest ?
-				$CGI->date($mdf->lastHarvest) :
-				$CGI->msg( 'status.noharvestyet' );
-			$row = $table->appendChild( dataElement( 'tr', undef, {class=>$c%2 ? 'oddrow' : 'evenrow'} ));
-			$row->appendChild( dataElement( 'td', dataElement( 'a', $repo->identifier, {href=>$edit_url, class=>'status'}) ));
-			$row->appendChild( dataElement( 'td', urlElement( $repo->baseURL )));
-			$row->appendChild( dataElement( 'td', $mdf->metadataPrefix ));
-			$row->appendChild( dataElement( 'td', $ds ));
-		}
-		unless(@mdfs) {
-			$row = $table->appendChild( dataElement( 'tr', undef, {class=>$c%2 ? 'oddrow' : 'evenrow'} ));
-			$row->appendChild( dataElement( 'td', dataElement( 'a', $repo->identifier, {href=>$edit_url, class=>'status'}) ));
-			$row->appendChild( dataElement( 'td', urlElement( $repo->baseURL )));
+		my $row = $table->appendChild( dataElement( 'tr', undef, {
+			($c % 2) ? (class=>'oddrow') : (),
+		}));
+		my $a = dataElement( 'a', $repo->identifier, {href=>$edit_url, class=>'status'});
+		$row->appendChild( @mdfs > 1 ?
+			dataElement( 'td', $a, {rowspan=>scalar(@mdfs)} ) :
+			dataElement( 'td', $a ) );
+		if( @mdfs ) {
+			foreach my $mdf (@mdfs) {
+				my $ds = $mdf->lastHarvest ?
+					$CGI->date($mdf->lastHarvest) :
+					$CGI->msg( 'status.noharvestyet' );
+				$row->appendChild( dataElement( 'td', $mdf->metadataPrefix ));
+				$row->appendChild( dataElement( 'td', $ds ));
+				$table->appendChild( $row = dataElement( 'tr', undef, {
+					($c % 2) ? (class=>'oddrow') : (),
+				}));
+			}
+			$table->removeChild($row);
+		} else {
 			$row->appendChild( dataElement( 'td', 'No metadata formats found', {colspan=>2, align=>'center'}));
 		}
 	}

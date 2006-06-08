@@ -42,12 +42,12 @@ function updatePage( response )
 	if( success == 1 )
 	{
 		td.className = 'state passed';
-		td.innerHTML = 'Passed';
+		td.innerHTML = document.getElementById( 'language.tick' ).value;
 	}
 	else
 	{
 		td.className = 'state failed';
-		td.innerHTML = 'Failed';
+		td.innerHTML = document.getElementById( 'language.cross' ).value;
 	}
 }
 

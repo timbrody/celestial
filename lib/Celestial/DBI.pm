@@ -65,7 +65,7 @@ use HTTP::OAI::Set;
 
 use Carp;
 
-use vars qw($AUTOLOAD $DB_MAX_ERROR_SIZE $DATE_FORMAT);
+use vars qw($AUTOLOAD $errstr $DB_MAX_ERROR_SIZE $DATE_FORMAT);
 
 $DB_MAX_ERROR_SIZE = 2**15; # 32k
 
@@ -107,8 +107,13 @@ sub connect {
 		push @opts, join( '=', $_ => $db->{ $_ });
 	}
 	my $dsn = $self->{_dsn} = "dbi:mysql:" . join(';', @opts);
-	$self->dbh(DBI->connect($dsn, $user, $pw))
-		or return undef;
+	unless( $self->dbh(DBI->connect($dsn, $user, $pw, {
+		PrintError => 1,
+		RaiseError => 0,
+	})) ) {
+		$errstr = $DBI::errstr;
+		return undef;
+	}
 	return $self;
 }
 
@@ -956,12 +961,8 @@ sub new {
 			utf8::decode($_); # Decode utf8 from the databsae
 		}
 		return bless({_elem => $_[0]}, $class);
-	} elsif( @_ % 2 == 0 ) {
-		my %self = @_;
-		$self{_elem} = {};
-		return bless(\%self, $class);
 	} else {
-		return bless({_elem => {}}, $class);
+		return bless({_elem => {}, @_}, $class);
 	}
 }
 
