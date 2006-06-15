@@ -172,6 +172,7 @@ use warnings;
 use CGI qw();
 use Apache2;
 use Apache::RequestIO;
+use HTML::Entities;
 
 sub handler
 {
@@ -227,7 +228,7 @@ hr {
 		$q->div({class=>'header'}, $q->h1("Internal Server Error")),
 		$q->div({class=>'body'},
 			$q->p("An internal server error ($status) has occurred. The following message was received:"),
-			$q->div({class=>'error'}, $msg),
+			$q->div({class=>'error'}, encode_entities($msg)),
 			$q->p("Please try again later."),
 		),
 		$q->div({class=>'footer'},
