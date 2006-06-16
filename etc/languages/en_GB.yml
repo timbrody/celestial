@@ -27,6 +27,9 @@ input.frequency: Days Between Report
 input.confirm: Are you sure?
 input.previous: Last Report Sent
 input.mailHost: SMTP Mail Host
+input.metadataPrefix: Metadata Prefix
+input.lastHarvest: Last Harvest
+input.cardinality: Total Records
 
 mdf.schema: Metadata Schema
 mdf.metadatanamespace: Metadata Namespace

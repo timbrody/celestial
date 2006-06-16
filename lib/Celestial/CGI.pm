@@ -94,8 +94,8 @@ sub datestamp {
 }
 
 sub uri_escape {
-	my $str = @_ == 1 ? shift : $_[1];
-	return URI::Escape::uri_escape_utf8($str);
+	shift if ref($_[0]) and $_[0]->isa('Celestial::CGI');
+	return URI::Escape::uri_escape_utf8(@_);
 }
 
 sub uri_unescape {

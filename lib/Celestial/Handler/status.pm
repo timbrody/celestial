@@ -18,6 +18,23 @@ sub title {
 	return $CGI->msg( 'status.title' );
 }
 
+sub head {
+	my( $self, $CGI ) = @_;
+
+	my $head = $self->SUPER::head( $CGI );
+
+#	$head->appendChild( dataElement( 'script', undef, {
+#		type => 'text/javascript',
+#		src => $CGI->as_link( 'static/ajax/sorttable.js' )
+#	}));
+	$head->appendChild( dataElement( 'script', undef, {
+		type => 'text/javascript',
+		src => $CGI->as_link( 'static/ajax/handler/static.js' )
+	}));
+
+	return $head;
+}
+
 sub body {
 	my( $self, $CGI ) = @_;
 	my $dbh = $self->dbh;
@@ -25,16 +42,17 @@ sub body {
 
 	my $body = $dom->createElement( 'div' );
 
-	my $table = $body->appendChild( dataElement( 'table', undef, {class=>'status'} ));
+	my $table = $body->appendChild( dataElement( 'table', undef, {
+		class => 'status sortable',
+		id => 'status_table'
+	} ));
 	$table->appendChild( my $caption = dataElement( 'caption' ));
 
-#	my $row = $table->appendChild( dataElement( 'tr' ));
-#	if( $CGI->authorised ) {
-#		$row->appendChild( dataElement( 'th' ));
-#	}
-#	for(qw(  BaseURL Schema LastHarvest LastError )) {
-#		$row->appendChild( dataElement( 'th', $_ ));
-#	}
+	my $row = $table->appendChild( dataElement( 'tr' ));
+	for(qw( identifier metadataPrefix lastHarvest cardinality )) {
+		my $cid = "sortCol$_";
+		$row->appendChild( dataElement( 'th', $CGI->msg( 'input.'.$_ )));
+	}
 
 	my $c = 0;
 	$dbh->do("LOCK TABLES Repositories READ, MetadataFormats READ");
@@ -56,13 +74,14 @@ sub body {
 					$CGI->msg( 'status.noharvestyet' );
 				$row->appendChild( dataElement( 'td', $mdf->metadataPrefix ));
 				$row->appendChild( dataElement( 'td', $ds ));
+				$row->appendChild( dataElement( 'td', $mdf->cardinality, {align=>'right'} ));
 				$table->appendChild( $row = dataElement( 'tr', undef, {
 					($c % 2) ? (class=>'oddrow') : (),
 				}));
 			}
 			$table->removeChild($row);
 		} else {
-			$row->appendChild( dataElement( 'td', 'No metadata formats found', {colspan=>2, align=>'center'}));
+			$row->appendChild( dataElement( 'td', 'No metadata formats found', {colspan=>3, align=>'center'}));
 		}
 	}
 	$dbh->do("UNLOCK TABLES");
