@@ -30,6 +30,8 @@ input.mailHost: SMTP Mail Host
 input.metadataPrefix: Metadata Prefix
 input.lastHarvest: Last Harvest
 input.cardinality: Total Records
+input.storage: Size
+input.locked: Locked State
 
 mdf.schema: Metadata Schema
 mdf.metadatanamespace: Metadata Namespace
@@ -70,6 +72,7 @@ repository.mdfs.unlock: Resume harvesting
 
 subscribe.subscribed: Reports will be sent to $1 every $2 days.
 subscribe.unsubscribed: Reports will no longer be sent to $1.
+subscribe.toconfirm: You have been sent a confirmation email, once confirmed reports will be sent to $1 every $2 days.
 
 subscription.submit: Show Subscriptions
 subscription.title: Report Subscriptions
@@ -84,12 +87,14 @@ subscription.removedall: Removed all subscriptions.
 subscription.combine.warning: Note this will reset the date of all reports you're subscribed to!
 subscription.combine.legend: Combine all reports into a single email
 subscription.combine.submit: Combine
+subscription.confirmed: Confirmed that you want to receive reports. If you remove all of your subscriptions you will need to reconfirm.
 
 error.no_auth: You must log in to access this feature.
 error.email: $1 is not a valid email address.
 error.frequency: Frequency must be between 7 and 90 days.
 error.nosubscriptions: No subscriptions found for '$1'.
 error.nosuchrepository: No repository found with identifier '$1'.
+error.deletedrepository: Repository has been deleted.
 
 report.subject: $1 Report
 report.header: >
@@ -125,3 +130,20 @@ report.fulltext.none: No new full-texts detected in period.
 report.errors.heading: Errors Encountered
 report.errors.none: No errors were encountered during harvesting.
 report.footer:
+report.confirm.subject: Confirm your subscription to receive reports
+report.confirm.message: >
+ Dear $1,
+
+
+ You appear to have requested report(s) from the Celestial service. Before being sent a report you must confirm your request, by following this link
+
+ <$2>
+
+
+ You need only confirm once, and can change your subscription options at any time by going to this page
+
+
+ <$3>
+
+
+ If you have been sent this message in error please accept our apologies and you can safely ignore this email.

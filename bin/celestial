@@ -219,10 +219,12 @@ foreach my $repo ($dbh->listRepositories) {
 	foreach my $mdf ($repo->listMetadataFormats) {
 		my $tblname = $mdf->table;
 		my $c = 0;
+		my $s = 0;
 		if( $dbh->table_exists($tblname) ) {
-			$c = $dbh->cardinality( $tblname );
+			$mdf->cardinality( $dbh->cardinality( $tblname ));
+			$mdf->storage( $dbh->storage( $tblname ));
+			$mdf->commit;
 		}
-		$dbh->setCardinality( $mdf, $c );
 	}
 }
 
@@ -315,6 +317,7 @@ sub update_repository {
 	my @mdfs = map { $repo->addMetadataFormat($_) } $lmdf->metadataFormat;
 
 	foreach my $mdf (@mdfs) {
+		next if defined($mdf->locked);
 		my $lastHarvest = $dbh->lastHarvest($mdf);
 		$latestHarvest = $lastHarvest if( $lastHarvest && $lastHarvest > $latestHarvest );
 

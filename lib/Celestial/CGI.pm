@@ -10,6 +10,7 @@ use vars qw( $AUTOLOAD );
 use Apache::Const qw( REDIRECT NOT_FOUND );
 use URI;
 use URI::Escape qw();
+use Number::Bytes::Human qw();
 
 use vars qw( @ISA @EXPORT @EXPORT_OK );
 use Exporter;
@@ -66,7 +67,7 @@ sub absolute_link {
 sub msg {
 	my( $self, $term, @vars ) = @_;
 	my $phrase = $self->phrases->{ $term };
-	return "['$term']" unless defined($phrase);
+	return sprintf("[%s('%s')]", $term, join("','",@vars)) unless defined($phrase);
 	$phrase =~ s/\$(\d+)/$vars[$1-1]||"[invalid var index $1]"/seg;
 	return $phrase;
 }
@@ -91,6 +92,11 @@ sub datestamp {
 	} else {
 		return "['$ds']";
 	}
+}
+
+sub humansize {
+	my( $self, $bytes ) = @_;
+	return Number::Bytes::Human::format_bytes( $bytes );
 }
 
 sub uri_escape {

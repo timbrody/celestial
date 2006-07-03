@@ -49,13 +49,13 @@ sub body {
 	$table->appendChild( my $caption = dataElement( 'caption' ));
 
 	my $row = $table->appendChild( dataElement( 'tr' ));
-	for(qw( identifier metadataPrefix lastHarvest cardinality )) {
+	for(qw( identifier metadataPrefix lastHarvest cardinality storage locked )) {
 		my $cid = "sortCol$_";
 		$row->appendChild( dataElement( 'th', $CGI->msg( 'input.'.$_ )));
 	}
 
 	my $c = 0;
-	$dbh->do("LOCK TABLES Repositories READ, MetadataFormats READ");
+	$dbh->do("LOCK TABLES Repositories READ, MetadataFormats READ, Locks READ");
 	foreach my $repo ($dbh->listRepositories) {
 		$c++;
 		my @mdfs = $repo->listMetadataFormats;
@@ -75,13 +75,30 @@ sub body {
 				$row->appendChild( dataElement( 'td', $mdf->metadataPrefix ));
 				$row->appendChild( dataElement( 'td', $ds ));
 				$row->appendChild( dataElement( 'td', $mdf->cardinality, {align=>'right'} ));
+				$row->appendChild( dataElement( 'td', $CGI->humansize($mdf->storage), {align=>'right'} ));
+				$ds = defined($repo->getLock) ? $repo->getLock : $mdf->locked;
+				if( !defined( $ds ) ) {
+					$row->appendChild( dataElement( 'td', $CGI->tick, {class=>'state passed'}));
+				} elsif( $ds > 0 ) {
+					$row->appendChild( dataElement( 'td', $CGI->unknown, {class=>'state unknown'}));
+				} else {
+					$row->appendChild( dataElement( 'td', $CGI->cross, {class=>'state failed'}));
+				}
 				$table->appendChild( $row = dataElement( 'tr', undef, {
 					($c % 2) ? (class=>'oddrow') : (),
 				}));
 			}
 			$table->removeChild($row);
 		} else {
-			$row->appendChild( dataElement( 'td', 'No metadata formats found', {colspan=>3, align=>'center'}));
+			$row->appendChild( dataElement( 'td', 'No metadata formats found', {colspan=>4, align=>'center'}));
+			my $ds = $repo->getLock;
+			if( !defined( $ds ) ) {
+				$row->appendChild( dataElement( 'td', $CGI->tick, {class=>'state passed'}));
+			} elsif( $ds > 0 ) {
+				$row->appendChild( dataElement( 'td', $CGI->unknown, {class=>'state unknown'}));
+			} else {
+				$row->appendChild( dataElement( 'td', $CGI->cross, {class=>'state failed'}));
+			}
 		}
 	}
 	$dbh->do("UNLOCK TABLES");

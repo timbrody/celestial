@@ -59,6 +59,7 @@ use POSIX qw/strftime/;
 use DBI;
 use XML::LibXML;
 use Encode;
+use Net::SMTP;
 
 use HTTP::OAI::Record;
 use HTTP::OAI::Set;
@@ -287,11 +288,9 @@ sub table_exists {
 	return defined($rc) ? 1 : 0;
 }
 
-=pod
-
 =item $dbh->cardinality($name)
 
-Returns the size of table $name
+Returns the number of records in table $name
 
 =cut
 
@@ -302,6 +301,20 @@ sub cardinality {
 	my ($c) = $sth->fetchrow_array();
 	$sth->finish;
 	return $c;
+}
+
+=item $dbh->storage($name)
+
+Returns the number of bytes used by table $name (as reported by MySQL's SHOW TABLE STATUS).
+
+=cut
+
+sub storage {
+	my( $self, $name ) = @_;
+	my $sth = $self->prepare("SHOW TABLE STATUS LIKE '$name'");
+	$sth->execute;
+	my $row = $sth->fetchrow_hashref;
+	return $row->{Data_length};
 }
 
 sub listConfigs {
@@ -634,6 +647,51 @@ sub listReportsByEmail {
 	return @reps;
 }
 
+=item $dbh->sendConfirmation( $report )
+
+Checks whether the user has ever confirmed a report before, if so set this report has confirmed. Otherwise send a confirmation email.
+
+=cut
+
+sub sendConfirmation {
+	my( $dbh, $cgi, $report ) = @_;
+	return if $report->confirmed;
+
+	my @reps = $dbh->listReportsByEmail( $report->email );
+	my $confirmed;
+	for( @reps ) {
+		last if $confirmed = $_->confirmed;
+	}
+
+	if( $confirmed ) {
+		$report->confirmed( 1 );
+		$report->commit;
+		return $confirmed;
+	}
+
+	my $host = $dbh->mailHost || 'localhost';
+	my $smtp = Net::SMTP->new( $host );
+
+	my $curl = $cgi->absolute_link($cgi->as_link( 'subscription',
+		email => $report->email,
+		action => 'confirm',
+	));
+	my $surl = $cgi->absolute_link($cgi->as_link( 'subscription',
+		email => $report->email,
+	));
+
+	my $msg = "To: " . $report->email . "\n" .
+		"Subject: " . $cgi->msg( 'report.confirm.subject' ) . "\n\n" .
+		$cgi->msg( 'report.confirm.message', $report->email, $curl, $surl );
+	$smtp->mail( $dbh->adminEmail );
+	$smtp->to( $report->email );
+	$smtp->data( encode("iso-8859-1", $msg ));
+
+	$smtp->quit;
+
+	return 0;
+}
+
 # Internal set/get values from the MetadataFormats table (status part)
 
 sub _status
@@ -962,7 +1020,7 @@ sub new {
 		}
 		return bless({_elem => $_[0]}, $class);
 	} else {
-		return bless({_elem => {}, @_}, $class);
+		return bless({_elem => {@_}}, $class);
 	}
 }
 
@@ -1305,7 +1363,7 @@ package Celestial::MetadataFormat;
 use vars qw(@ISA $TABLE_SCHEMA @COLUMNS @DATE_COLUMNS);
 @ISA = qw(Celestial::Encapsulation);
 
-@COLUMNS = qw( id repository metadataPrefix schema metadataNamespace lastToken cardinality );
+@COLUMNS = qw( id repository metadataPrefix schema metadataNamespace lastToken cardinality storage );
 @DATE_COLUMNS = qw( locked lastHarvest lastFullHarvest lastAttempt lastFulltextHarvest );
 
 $TABLE_SCHEMA = <<EOS;

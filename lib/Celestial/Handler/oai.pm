@@ -38,7 +38,14 @@ sub page
 	if( $source ) {
 		$source =~ s/^\///;
 		$source = $CGI->uri_unescape($source);
-		my $repoid = $dbh->getRepositoryId($source);
+		my $repoid;
+		if( $source =~ /^https?:\/\// ) {
+			$repoid = $dbh->getRepositoryBaseURL($source);
+		} elsif( $source ne '' and $source !~ /[^0-9]/ ) {
+			$repoid = 0 + $source;
+		} else {
+			$repoid = $dbh->getRepositoryId($source);
+		}
 		$repo = $dbh->getRepository($repoid) if defined($repoid);
 	}
 

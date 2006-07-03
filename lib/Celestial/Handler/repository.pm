@@ -34,7 +34,7 @@ sub body {
 	)
 	{
 		$repo->remove;
-		return $self->error( $CGI, $CGI->msg( 'error.nosuchrepository', $repoid ));
+		return $self->error( $CGI, $CGI->msg( 'error.deletedrepository', $repoid ));
 	}
 
 	my $body = $dom->createElement( 'div' );
@@ -116,9 +116,12 @@ sub _subscribe {
 				email => $email,
 				frequency => $freq,
 				include => 0,
-				confirmed => '',
+				confirmed => undef,
 			});
-			$body->appendChild( $self->notice( $CGI, $CGI->msg( 'subscribe.subscribed', $email, $freq )));
+			my $msg = $dbh->sendConfirmation( $CGI, $repo->getReport( $email )) ?
+				$CGI->msg( 'subscribe.subscribed', $email, $freq ) :
+				$CGI->msg( 'subscribe.toconfirm', $email, $freq );
+			$body->appendChild( $self->notice( $CGI, $msg ));
 		}
 	}
 

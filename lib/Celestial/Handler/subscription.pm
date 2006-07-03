@@ -59,7 +59,8 @@ sub _edit_reports {
 			defined($repo = $dbh->getRepository( $id )) ) {
 			$repo->removeReport( $email );
 			$body->appendChild( $self->notice( $CGI, $CGI->msg( 'subscription.removed', $repo->identifier )));
-			return $self->_edit_reports( $body, $CGI, $email );
+			@reps = $dbh->listReportsByEmail( $email );
+			return if scalar(@reps) == 0;
 		}
 	} elsif( $CGI->action eq 'removeall' and $CGI->param( 'confirm' ) ) {
 		foreach my $rep (@reps) {
@@ -77,6 +78,12 @@ sub _edit_reports {
 				$rep->commit;
 			}
 		}
+	} elsif( $CGI->action eq 'confirm' ) {
+		foreach my $rep (@reps) {
+			$rep->confirmed( 1 );
+			$rep->commit;
+		}
+		$body->appendChild( $self->notice( $CGI, $CGI->msg( 'subscription.confirmed' )));
 	}
 
 	$body->appendChild( dataElement( 'h4', $CGI->msg( 'subscription.subtitle', $email )));
