@@ -545,7 +545,7 @@ sub harvest_Fulltext
 	}
 	my $st;
 	while( my ($id) = $sth->fetchrow_array ) {
-		$ftt->removeRecord( $id );
+		$ftt->removeFulltext( $id );
 		my $rec = $mdf->getRecord( $id );
 		next if $rec->header->is_deleted;
 		warn sprintf("Searching for full-text for %s\n", $rec->identifier) if $opt_verbose;
