@@ -129,7 +129,7 @@ report.mdf.successful: Most recent successful harvest was at $1.
 report.fulltext.none: No new full-texts detected in period.
 report.errors.heading: Errors Encountered
 report.errors.none: No errors were encountered during harvesting.
-report.footer:
+report.footer: This report was automatically generated from Celestial. The administrative contact for this server is registered as $1.
 report.confirm.subject: Confirm your subscription to receive reports
 report.confirm.message: >
  Dear $1,
