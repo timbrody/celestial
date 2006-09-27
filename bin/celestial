@@ -89,6 +89,7 @@ use Celestial::DBI;
 use Date::Parse;
 use File::Temp;
 use XML::LibXML;
+use XML::LibXML::XPathContext;
 
 die if $HTTP::OAI::Harvester::VERSION < 3.12;
 
@@ -101,7 +102,8 @@ use constant {
 #$HTTP::OAI::UserAgent::USE_EVAL = 0;
 #$HTTP::OAI::Response::USE_EVAL = 0;
 
-my( $opt_verbose, $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun );
+our $opt_verbose;
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun );
 $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
@@ -531,7 +533,18 @@ sub harvest_Fulltext
 	my( $dbh, %args ) = @_;
 	my( $ha, $repo, $from ) = @args{qw( harvestAgent repository from )};
 
-	my $mdf = $repo->getMetadataFormat('oai_dc') or return;
+	my $mets;
+	for($repo->listMetadataFormats())
+	{
+		if( $_->metadataNamespace eq 'http://www.loc.gov/METS/' )
+		{
+			$mets = $_;
+			last;
+		}
+	}
+
+	my $mdf = $repo->getMetadataFormat( 'oai_dc' ) or return;
+
 	my $ftt = $mdf->getFulltext();
 
 	my $sth;
@@ -546,21 +559,31 @@ sub harvest_Fulltext
 	my $st;
 	while( my ($id) = $sth->fetchrow_array ) {
 		$ftt->removeFulltext( $id );
-		my $rec = $mdf->getRecord( $id );
+
+		my $rec = $mets ?
+			$mets->getRecord( $id ) :
+			$mdf->getRecord( $id );
+
 		next if $rec->header->is_deleted;
 		warn sprintf("Searching for full-text for %s\n", $rec->identifier) if $opt_verbose;
+
 		unless( $rec->metadata ) {
 			warn sprintf("%s doesn't contain any metadata\n", $rec->identifier);
 			next;
 		}
 
-		my $dc = HTTP::OAI::Metadata::OAI_DC->new();
-		$rec->metadata->set_handler(
-			HTTP::OAI::SAXHandler->new( # Required to supply Text
-				Handler => $dc
-		));
-		$rec->metadata->generate;
-		$rec->metadata( $dc );
+		if( $mets )
+		{
+			$rec->metadata( HTTP::OAI::Metadata::METS->new( dom => $rec->metadata->dom ));
+		} else {
+			my $dc = HTTP::OAI::Metadata::OAI_DC->new();
+			$rec->metadata->set_handler(
+				HTTP::OAI::SAXHandler->new( # Required to supply Text
+					Handler => $dc
+			));
+			$rec->metadata->generate;
+			$rec->metadata( $dc );
+		}
 		$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
 		my $ft = Celestial::FullText->new(
 			$ha,
@@ -656,18 +679,25 @@ sub run_droid {
 	my $tmp = File::Temp->new( CLEANUP => 1 );
 	system("$JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn >/dev/null");
 	my $doc = XML::LibXML->new->parse_file("$tmp.xml");
+	my $xc = XML::LibXML::XPathContext->new( $doc );
+	$xc->registerNs('rc','http://www.nationalarchives.gov.uk/pronom/FileCollection');
 	unlink("$tmp.xml");
 	my @formats;
-	for($doc->findnodes("//FileFormatHit")) {
-		my $fmt = defined($_->getAttribute('FormatVersion')) ?
+	for($xc->findnodes("//rc:FileFormatHit")) {
+		my %attr;
+		foreach my $valnode (grep { $_->nodeType == XML_ELEMENT_NODE } $_->childNodes)
+		{
+			$attr{ $valnode->nodeName } = $valnode->textContent;
+		}
+		my $fmt = defined($attr{ 'Version' }) ?
 			sprintf("%s (%s)",
-					$_->getAttribute('FormatName'),
-					$_->getAttribute('FormatVersion')
+					$attr{ 'Name' },
+					$attr{ 'Version' }
 				   ) :
-				$_->getAttribute('FormatName');
+				$attr{ 'Name' };
 
 		push @formats, [
-			$_->getAttribute('FormatPUID'),
+			$attr{ 'PUID' },
 			$fmt,
 			];
 		#warn "FORMAT: $fn => ", join(',',map { $_ || '(null)' } @{$formats[$#formats]}), "\n";

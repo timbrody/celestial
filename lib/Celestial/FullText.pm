@@ -7,6 +7,7 @@ use Carp;
 use URI;
 use HTTP::OAI;
 use HTTP::OAI::Metadata::OAI_DC;
+use HTTP::OAI::Metadata::METS;
 
 use vars qw( $MAX_FILE_SIZE );
 
@@ -15,6 +16,7 @@ our $VERSION = '0.01';
 our %SERVER_TYPES = (
 	eprints => "GNU EPrints",
 	dspace => "DSpace",
+	mets => "METS",
 );
 
 # Preloaded methods go here.
@@ -69,6 +71,12 @@ sub server_type
 	return $self->{ server_type } if $self->{ server_type };
 	my $ha = $self->{ ha };
 	my $rec = $self->{ record };
+
+	if( $rec->metadata->isa( 'HTTP::OAI::Metadata::METS' ))
+	{
+		return $self->{ server_type } = "mets";
+	}
+
 	my $ids = $rec->metadata->dc->{ identifier };
 
 	{
@@ -82,10 +90,22 @@ sub server_type
 	foreach my $url (grep { /^https?:/ } @$ids)
 	{
 		my $r = $ha->head( $url );
-		next unless $r->is_success;
+		unless( $r->is_success ) {
+			warn sprintf("Error requesting [%s]: %s\n",
+				$url,
+				$r->message,
+			);
+			return;
+		}
 		next unless $r->content_type eq 'text/html' or $r->content_type eq 'text/xml';
 		$r = $ha->get( $url );
-		next unless $r->is_success;
+		unless( $r->is_success ) {
+			warn sprintf("Error requesting [%s]: %s\n",
+				$url,
+				$r->message,
+			);
+			return;
+		}
 
 		my $ct = $r->content;
 		if( $ct =~ /\"metadataFieldLabel\"/ and $ct =~ /\"metadataFieldValue\"/ )
@@ -94,6 +114,8 @@ sub server_type
 			return $self->{ server_type } = "dspace";
 		}
 	}
+
+	return;
 }
 
 sub _dspace
@@ -108,18 +130,28 @@ sub _dspace
 		($jo) = @{$rec->metadata->dc->{ identifier }};
 	}
 	$jo = $ha->get( $jo );
-	return unless $jo->is_success;
+	unless( $jo->is_success ) {
+		warn sprintf("Error requesting [%s]: %s\n",
+			$jo->request->uri,
+			$jo->message,
+		);
+		return undef;
+	}
 	my $ct = $jo->content;
 	my $bu = $jo->request->uri;
 	$bu->path('');
 
-	while( $ct =~ m/\"([^\"]+?bitstream[^\"]+?)\"/g )
+	while( $ct =~ m/\"([^\"]+?bitstream[^\"]+?)\"/sg )
 	{
 		my $uri = URI->new_abs( $1, $bu );
-		push @fmts, Celestial::FullText::Format->new( $ha, $uri );
+		if( my $fmt = Celestial::FullText::Format->new( $ha, $uri ) ) {
+			push @fmts, $fmt;
+		} else {
+			warn sprintf("Error requesting [%s], ignoring!\n", $uri);
+		}
 	}
 
-	return grep { defined($_) } @fmts;
+	return @fmts;
 }
 
 sub _eprints
@@ -146,6 +178,25 @@ sub _eprints
 	return grep { defined $_ } map { Celestial::FullText::Format->new( $ha, $_ ) } @urls;
 }
 
+sub _mets
+{
+	my $self = shift;
+	my $ha = $self->{ ha };
+	my $rec = $self->{ record };
+
+	my $bu = URI->new($ha->baseURL)->canonical;
+	$bu->path('');
+
+	my @urls;
+	for($rec->metadata->files)
+	{
+warn "Got url: " . $_->{ url };
+		push @urls, $_->{ url } if $_->{ url };
+	}
+
+	return grep { defined $_ } map { Celestial::FullText::Format->new( $ha, $_ ) } @urls;
+}
+
 package Celestial::FullText::Format;
 
 use overload '""' => \&to_string;
@@ -159,7 +210,10 @@ sub new
 {
 	my( $class, $ua, $url ) = @_;
 	my $r = $ua->head( $url );
-	return undef unless $r->is_success;
+	unless( $r->is_success ) {
+		warn "Error requesting [$url]: " . $r->message . "\n";
+		return undef;
+	}
 	my $mt = MIME::Types->new->type( $r->header( 'Content-Type' )) || $r->header( 'Content-Type' );
 	my $date = $r->headers->header( 'Last-Modified' );
 	my $cl = $r->headers->header("Content-Length");
@@ -240,7 +294,7 @@ sub file
 		unless( $r->is_success ) {
 			if( $r->header('X-Died') ) {
 				if( $r->header('X-Died') =~ /^toobig/ ) {
-					warn "GET for " . $r->request->uri . " resulted in a toobig file";
+					warn "GET for " . $r->request->uri . " resulted in a toobig file\n";
 				} else {
 					Carp::confess $r->header('X-Died');
 				}

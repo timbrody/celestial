@@ -876,8 +876,8 @@ sub updateMetadata($$$)
 		$accession = $rec->datestamp;
 	}
 
-	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,?,?,?)");
-	$sth->execute($id,$accession,$rec->identifier,$hd,$md,$ab)
+	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`status`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,?,?,?)");
+	$sth->execute($id,$accession,$rec->identifier,$rec->status,$hd,$md,$ab)
 		or die "Error writing to $tblname: $!";
 	$sth->finish;
 	$id = $sth->{'mysql_insertid'} unless defined($id);
@@ -1094,7 +1094,7 @@ $SETS_SCHEMA{'Sets'} = <<EOS;
 `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
 `setSpec` TINYTEXT NOT NULL,
 `setName` TEXT,
-PRIMARY KEY(`setSpec`(64)),
+PRIMARY KEY(`setSpec`(255)),
 UNIQUE(`id`)
 )
 EOS
