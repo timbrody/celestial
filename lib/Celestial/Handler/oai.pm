@@ -152,7 +152,7 @@ sub Identify {
 		$r->adminEmail('mailto:' . $dbh->adminEmail);
 		$r->repositoryName($dbh->repositoryName);
 
-		my $sth = $dbh->prepare("SELECT distinct baseURL FROM Repositories ORDER BY baseURL");
+		my $sth = $dbh->prepare("SELECT distinct `baseURL` FROM Repositories ORDER BY `baseURL`");
 		$sth->execute;
 
 		my $dom = XML::LibXML->createDocument('1.0','UTF-8');
@@ -210,7 +210,7 @@ sub ListIdentifiers {
 
 #	my @rids = sort { $a <=> $b } repositoryIds($dbh, $source, $mdp);
 
-	my $SQL = "SELECT `id`,DATE_FORMAT(`datestamp`,'$Celestial::DBI::DATE_FORMAT'),`header` FROM " . $mdf->table . " ";
+	my $SQL = "SELECT `id`,DATE_FORMAT(`datestamp`,'$Celestial::DBI::DATE_FORMAT'),UNCOMPRESS(`header`) FROM " . $mdf->table . " ";
 	my @LOGIC = ();
 	my @VALUES = ();
 	my @ORDER = ();
@@ -350,7 +350,7 @@ sub ListRecords {
 
 #	my @rids = sort { $a <=> $b } repositoryIds($dbh, $source, $mdp);
 
-	my $SQL = "SELECT `id`,DATE_FORMAT(`datestamp`,'$Celestial::DBI::DATE_FORMAT'),`header`,`metadata`,`about` FROM " . $mdf->table . " ";
+	my $SQL = "SELECT `id`,DATE_FORMAT(`datestamp`,'$Celestial::DBI::DATE_FORMAT'),UNCOMPRESS(`header`),UNCOMPRESS(`metadata`),UNCOMPRESS(`about`) FROM " . $mdf->table . " ";
 	my @LOGIC = ();
 	my @VALUES = ();
 	my @ORDER = ();

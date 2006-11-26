@@ -829,7 +829,7 @@ sub addProvenance($$$) {
 	$rec->about(HTTP::OAI::Metadata->new(dom=>$dom));
 }
 
-sub updateRecord($$$)
+sub updateRecord
 {
 	my ($self, $mdf, $rec ) = @_;
 	
@@ -840,7 +840,7 @@ sub updateRecord($$$)
 	return updateMetadata(@_);
 }
 
-sub updateMetadata($$$)
+sub updateMetadata
 {
 	my( $self, $mdf, $rec ) = @_;
 	my $repo = $mdf->repository;
@@ -876,7 +876,7 @@ sub updateMetadata($$$)
 		$accession = $rec->datestamp;
 	}
 
-	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`status`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,?,?,?)");
+	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`status`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,COMPRESS(?),COMPRESS(?),COMPRESS(?))");
 	$sth->execute($id,$accession,$rec->identifier,$rec->status,$hd,$md,$ab)
 		or die "Error writing to $tblname: $!";
 	$sth->finish;
@@ -943,7 +943,7 @@ sub getRecord {
 	my ($self, $mdf, $id, %opts) = @_;
 	my $parser = $self->parser;
 
-	my $sth = $self->prepare("SELECT `header`,`metadata`,`about` FROM ".$mdf->table." WHERE `id`=?");
+	my $sth = $self->prepare("SELECT UNCOMPRESS(`header`),UNCOMPRESS(`metadata`),UNCOMPRESS(`about`) FROM ".$mdf->table." WHERE `id`=?");
 	$sth->execute($id) or die $!;
 	my $ary = $sth->fetchrow_arrayref or return;
 
@@ -966,8 +966,8 @@ sub getRecord {
 sub getHeader {
 	my ($self, $repo, $id) = @_;
 
-	my $sth = $self->prepare("SELECT header FROM ".$repo->table." WHERE id=? LIMIT 1");
-	$sth->execute($id);
+	my $sth = $self->prepare("SELECT UNCOMPRESS(`header`) FROM ".$repo->table." WHERE `id`=$id LIMIT 1");
+	$sth->execute();
 	my $ary = $sth->fetchrow_arrayref or die "Record $id doesn't exist";
 	$sth->finish;
 
@@ -1435,6 +1435,12 @@ sub unlock
 	$self->commit;
 }
 
+=item $mdf->reset()
+
+Reset the harvest date (doesn't effect data).
+
+=cut
+
 sub reset
 {
 	my( $self ) = @_;
@@ -1445,6 +1451,12 @@ sub reset
 	$self->lastToken(undef);
 	$self->commit;
 }
+
+=item $mdf->removeAllRecords()
+
+Remove all data and reset the harvest date.
+
+=cut
 
 sub removeAllRecords
 {
