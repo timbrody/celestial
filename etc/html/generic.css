@@ -180,24 +180,24 @@ a:hover.navbar {
 	color: #ccc;
 }
 
-td.state {
+td.state, span.state {
 	font-weight: bold;
 	text-align: center;
 	padding-left: 3em;
 	padding-right: 3em;
 }
 
-td.passed {
+.passed {
 	color: #040;
 	background-color: #8f8;
 }
 
-td.failed {
+.failed {
 	color: #400;
 	background-color: #f88;
 }
 
-td.unknown {
+.unknown {
 	color: #444;
 	background-color: #ccc;
 }
@@ -243,4 +243,43 @@ td.label {
 }
 td.input {
 	width: 22em;
+}
+
+#status_table div.title {
+	margin-top: .5em;
+}
+#status_table div.state {
+	padding-left: 1em;
+}
+#status_table div.detail {
+	padding-left: 1em;
+}
+
+#status_table div.title a {
+}
+#status_table .detail_link {
+	font-size: 80%;
+}
+#status_table .baseURL {
+	padding-left: 1em;
+}
+#status_table .state a {
+	text-decoration: none;
+	color: #000;
+}
+#status_table span.state {
+	position: absolute;
+	left: 40em;
+}
+#status_table .detail td {
+	width: 10em;
+}
+#status_table table {
+	border: none;
+}
+
+.clickable {
+	cursor: pointer;
+	text-decoration: underline;
+	color: #00f;
 }

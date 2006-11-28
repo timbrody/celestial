@@ -39,6 +39,10 @@ sub head {
 
 	$head->appendChild(dataElement( 'title', $dbh->repositoryName . ' - ' . $self->title( $CGI )));
 	$head->appendChild(dataElement( 'style', "\@import url('".$CGI->as_link('static/generic.css')."');", { type => 'text/css', media => 'screen' }));
+	$head->appendChild(dataElement( 'script', undef, {
+		type => 'text/javascript',
+		src => $CGI->as_link( 'static/ajax/prototype-1.4.0.js' )
+	}));
 
 	return $head;
 }

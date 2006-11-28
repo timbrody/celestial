@@ -876,7 +876,7 @@ sub updateMetadata
 		$accession = $rec->datestamp;
 	}
 
-	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`status`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,COMPRESS(?),COMPRESS(?),COMPRESS(?))");
+	$sth = $self->prepare("REPLACE $tblname (`id`,`datestamp`,`accession`,`identifier`,`status`,`header`,`metadata`,`about`) VALUES (?,NOW(),?,?,?,COMPRESS(?),COMPRESS(?),COMPRESS(?))");
 	$sth->execute($id,$accession,$rec->identifier,$rec->status,$hd,$md,$ab)
 		or die "Error writing to $tblname: $!";
 	$sth->finish;
@@ -1079,6 +1079,14 @@ Celestial::Repository - Encapsulates a repository
 
 	$mdf = $repo->getMetadataFormat('oai_dc');
 	@mdfs = $repo->listMetadataFormats();
+
+=head1 METHODS
+
+=over 4
+
+=item $repo->identifier([identifier])
+
+Return and optionally set the given field.
 
 =cut
 
@@ -1331,6 +1339,8 @@ sub listSetIds($$) {
 	
 	return @ids;
 }
+
+=back
 
 =head1 NAME
 
