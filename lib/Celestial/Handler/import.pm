@@ -100,7 +100,7 @@ sub extract_urls {
 	$url = URI->new($url);
 
 	unless(
-		($url->scheme eq 'http' or $url->scheme eq 'http') and
+		($url->scheme eq 'http' or $url->scheme eq 'https') and
 		$url->host and $url->path
 	) {
 		return $body->appendChild( $self->error( $CGI->msg( 'error.import.invalid_url', $url )));
@@ -129,7 +129,7 @@ sub extract_urls {
 	$ua->timeout( 30 );
 
 	my $r = $ua->get( $url );
-	if( $r->is_error ) {
+	if( $r->code != 200 ) {
 		return $body->appendChild( $self->error( $r->message ));
 	}
 
