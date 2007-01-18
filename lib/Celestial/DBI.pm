@@ -1,7 +1,5 @@
 package Celestial::DBI;
 
-=pod
-
 =head1 NAME
 
 Celestial::DBI - Abstract interface to database
@@ -54,6 +52,14 @@ use warnings;
 use encoding 'utf8';
 
 use Celestial::Config;
+
+use Celestial::DBI::Encapsulation;
+use Celestial::DBI::Error;
+use Celestial::DBI::Fulltext;
+use Celestial::DBI::MetadataFormat;
+use Celestial::DBI::Report;
+use Celestial::DBI::Repository;
+use Celestial::DBI::Set;
 
 use POSIX qw/strftime/;
 use DBI;
@@ -409,7 +415,7 @@ sub getRepository($$) {
 	my $sth = $self->prepare("SELECT * FROM Repositories WHERE `id`=?");
 	$sth->execute( $id );
 	my $row = $sth->fetchrow_hashref or return;
-	return Celestial::Repository->new({
+	return Celestial::DBI::Repository->new({
 		%$row,
 		dbh => $self,
 	});
@@ -457,7 +463,7 @@ sub listRepositories($) {
 	$sth->execute;
 	my @REPOS;
 	while( my $row = $sth->fetchrow_hashref ) {
-		push @REPOS, Celestial::Repository->new({
+		push @REPOS, Celestial::DBI::Repository->new({
 			%$row,
 			dbh=>$self,
 		});
@@ -492,10 +498,10 @@ sub addRepository($$) {
 	my( $self, $repo ) = @_;
 
 	my $sth = $self->prepare(my $sql = sprintf('INSERT INTO Repositories (%s) VALUES (%s)',
-		join(',',map{"`$_`"} @Celestial::Repository::COLUMNS),
-		join(',',map{'?'} @Celestial::Repository::COLUMNS)
+		join(',',map{"`$_`"} @Celestial::DBI::Repository::COLUMNS),
+		join(',',map{'?'} @Celestial::DBI::Repository::COLUMNS)
 	));
-	$sth->execute(map { $repo->$_ } @Celestial::Repository::COLUMNS)
+	$sth->execute(map { $repo->$_ } @Celestial::DBI::Repository::COLUMNS)
 		or die "$sql: $!";
 	if( !defined($repo->id) ) {
 		$repo = $self->getRepository($self->dbh->{mysql_insertid});
@@ -511,13 +517,13 @@ sub addRepository($$) {
 sub listMetadataFormats {
 	my ($self, $repo) = @_;
 	my $cols = join(',',
-		map({ "`$_`" } @Celestial::MetadataFormat::COLUMNS),
-		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::MetadataFormat::DATE_COLUMNS));
+		map({ "`$_`" } @Celestial::DBI::MetadataFormat::COLUMNS),
+		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::DBI::MetadataFormat::DATE_COLUMNS));
 	my $sth = $self->prepare("SELECT $cols FROM MetadataFormats WHERE `repository`=?");
 	$sth->execute($repo->id);
 	my @mdfs;
 	while( my $row = $sth->fetchrow_hashref ) {
-		push(@mdfs, Celestial::MetadataFormat->new({
+		push(@mdfs, Celestial::DBI::MetadataFormat->new({
 			%$row,
 			dbh=>$self,
 			repository=>$repo
@@ -531,9 +537,9 @@ sub getMetadataFormat {
 	my ($self, $repo, $mdp) = @_;
 	my $sth;
 	my $cols = join(',',
-		map({ "`$_`" } @Celestial::MetadataFormat::COLUMNS),
-		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::MetadataFormat::DATE_COLUMNS));
-	if( defined($mdp) and $repo->isa('Celestial::Repository') ) {
+		map({ "`$_`" } @Celestial::DBI::MetadataFormat::COLUMNS),
+		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::DBI::MetadataFormat::DATE_COLUMNS));
+	if( defined($mdp) and $repo->isa('Celestial::DBI::Repository') ) {
 		$sth = $self->prepare("SELECT $cols FROM MetadataFormats WHERE `repository`=? AND `metadataPrefix`=?");
 		$sth->execute($repo->id, $mdp) or Carp::confess("Error getting metadata table for $mdp: $!");
 	} elsif( $repo !~ /\D/ ) {
@@ -547,7 +553,7 @@ sub getMetadataFormat {
 	if( !defined($mdp) or !ref($repo) ) {
 		$repo = $self->getRepository( $row->{ 'repository' } );
 	}
-	my $mdf = Celestial::MetadataFormat->new({
+	my $mdf = Celestial::DBI::MetadataFormat->new({
 		%$row,
 		dbh=>$self,
 		repository=>$repo,
@@ -558,7 +564,7 @@ sub getMetadataFormat {
 
 sub updateMetadataFormat {
 	my ($self, $mdf) = @_;
-	my @cols = (@Celestial::MetadataFormat::COLUMNS, @Celestial::MetadataFormat::DATE_COLUMNS);
+	my @cols = (@Celestial::DBI::MetadataFormat::COLUMNS, @Celestial::DBI::MetadataFormat::DATE_COLUMNS);
 	$self->do("REPLACE MetadataFormats (" .
 		join(',',map({"`$_`"} @cols)) .
 		") VALUES (" .
@@ -571,7 +577,7 @@ sub updateMetadataFormat {
 
 =item $dbh->addMetadataFormat( $repo, $mdf )
 
-Where $repo isa L<Celestial::Repository> and $mdf isa L<HTTP::OAI::MetadataFormat>.
+Where $repo isa L<Celestial::DBI::Repository> and $mdf isa L<HTTP::OAI::MetadataFormat>.
 
 =cut
 
@@ -620,7 +626,7 @@ sub _enableFormat {
 
 sub getFulltext {
 	my( $self, $mdf ) = @_;
-	return Celestial::Fulltext->new({
+	return Celestial::DBI::Fulltext->new({
 		dbh=>$self,
 		repository=>$mdf->repository,
 		id=>$mdf->id,
@@ -631,14 +637,14 @@ sub getFulltext {
 sub listReportsByEmail {
 	my( $dbh, $email ) = @_;
 	my $cols = join(',',
-		map({ "`$_`" } @Celestial::Report::COLUMNS),
-		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::Report::DATE_COLUMNS));
+		map({ "`$_`" } @Celestial::DBI::Report::COLUMNS),
+		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::DBI::Report::DATE_COLUMNS));
 	
 	my $sth = $dbh->prepare( "SELECT $cols FROM Reports WHERE `email`=?" );
 	$sth->execute( $email ) or Carp::confess $!;
 	my @reps;
 	while( my $row = $sth->fetchrow_hashref ) {
-		push @reps, Celestial::Report->new({
+		push @reps, Celestial::DBI::Report->new({
 			%$row,
 			dbh => $dbh,
 			repository => $dbh->getRepository( $row->{ repository } )
@@ -701,7 +707,7 @@ sub _status
 		$self->do("UPDATE MetadataFormats SET `$key`=? WHERE `id`=?",{},$value,$id)
 			or Carp::confess("$key => $value: $!");
 	} else {
-		my $cols = scalar(grep { $_ eq $key } @Celestial::MetadataFormat::DATE_COLUMNS) ?
+		my $cols = scalar(grep { $_ eq $key } @Celestial::DBI::MetadataFormat::DATE_COLUMNS) ?
 			"DATE_FORMAT(`$key`,'$DATE_FORMAT')" :
 			"`$key`";
 		my $sth = $self->prepare("SELECT $cols FROM MetadataFormats WHERE `id`=?");
@@ -797,7 +803,7 @@ sub listErrors($$)
 	my( $dbh, $mdf ) = @_;
 	my $sth = $dbh->prepare("SELECT *,DATE_FORMAT(`datestamp`,'$DATE_FORMAT') AS `datestamp` FROM harvestLog WHERE `metadataFormat`=?");
 	$sth->execute($mdf->id) or Carp::confess $!;
-	return Celestial::Error->new({
+	return Celestial::DBI::Error->new({
 		dbh=>$dbh,
 		metadataFormat=>$mdf,
 		_sth=>$sth,
@@ -998,861 +1004,5 @@ sub getRecordAccession {
 Tim Brody <tdb01r@ecs.soton.ac.uk>
 
 =cut
-
-#
-#	Encapsulation
-#
-# Encapsulation simply encapsulates a data structure in
-# an OO wrapper.
-#
-
-package Celestial::Encapsulation;
-
-use Carp qw( confess );
-use vars qw($AUTOLOAD);
-use encoding 'utf8';
-
-sub new {
-	my $class = shift;
-	if( @_ == 1 and ref($_[0]) eq 'HASH' ) {
-		foreach(values %{$_[0]}) {
-			utf8::decode($_); # Decode utf8 from the databsae
-		}
-		return bless({_elem => $_[0]}, $class);
-	} else {
-		return bless({_elem => {@_}}, $class);
-	}
-}
-
-sub require {
-	my $self = shift;
-	for(@_) {
-		unless(defined($self->{_elem}->{$_})) {
-			confess("Requires argument: $_");
-		}
-	}
-}
-
-sub AUTOLOAD {
-	my $self = shift;
-	Carp::confess("Attempt to call object method [$AUTOLOAD] on class") unless ref($self);
-	$AUTOLOAD =~ s/^.*:://;
-	return if $AUTOLOAD eq 'DESTROY';
-	$self->_elem($AUTOLOAD,@_);
-}
-
-sub prepare {
-	Carp::confess( "prepare not allowed on Encapsulation" );
-}
-sub do {
-	Carp::confess( "do not allowed on Encapsulation" );
-}
-
-sub asHash {
-	my $self = shift;
-	return %{$self->asHashRef};
-}
-
-sub asHashRef {
-	my $self = shift;
-	return $self->{_elem};
-}
-
-sub _elem {
-	my $self = shift;
-	my $name = shift;
-	return @_ ? $self->{_elem}->{$name} = shift : $self->{_elem}->{$name};
-}
-
-=pod
-
-=head1 NAME
-
-Celestial::Repository - Encapsulates a repository
-
-=head1 SYNOPSIS
-
-	my $repo = $dbh->getRepository($id);
-
-	$mdf = new HTTP::OAI::MetadataFormat(...);
-	$mdf = $repo->addMetadataFormat($mdf);
-
-	$mdf = $repo->getMetadataFormat('oai_dc');
-	@mdfs = $repo->listMetadataFormats();
-
-=head1 METHODS
-
-=over 4
-
-=item $repo->identifier([identifier])
-
-Return and optionally set the given field.
-
-=cut
-
-package Celestial::Repository;
-
-use vars qw(@ISA @COLUMNS %SETS_SCHEMA $MDF_SCHEMA );
-@ISA = qw(Celestial::Encapsulation);
-
-@COLUMNS = qw( id identifier baseURL harvestMethod harvestSets harvestFrequency fullHarvestFrequency Identify );
-
-$SETS_SCHEMA{'Sets'} = <<EOS;
-(
-`id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-`setSpec` TINYTEXT NOT NULL,
-`setName` TEXT,
-PRIMARY KEY(`setSpec`(255)),
-UNIQUE(`id`)
-)
-EOS
-$SETS_SCHEMA{'SetDescriptions'} = <<EOS;
-(
-`set` INT(10) UNSIGNED NOT NULL,
-`description` LONGBLOB NOT NULL,
-KEY(`set`)
-)
-EOS
-$SETS_SCHEMA{'SetMemberships'} = <<EOS;
-(
-`set` INT(10) UNSIGNED NOT NULL,
-`record` INT(10) UNSIGNED NOT NULL,
-PRIMARY KEY(`set`,`record`),
-KEY(`record`,`set`)
-)
-EOS
-
-$MDF_SCHEMA = <<EOS;
-CREATE TABLE MetadataFormats (
-	`id` INT UNSIGNED NOT NULL,
-	`repository` INT UNSIGNED NOT NULL,
-	`metadataPrefix` VARCHAR(64) NOT NULL,
-	`schema` TINYTEXT,
-	`metadataNamespace` TINYTEXT,
-	`lastHarvest` DATETIME,
-	`lastFullHarvest` DATETIME,
-	`lastAttempt` DATETIME,
-	`lastToken` TEXT,
-	`lastFulltextHarvest` DATETIME,
-	`cardinality` INT UNSIGNED,
-	PRIMARY KEY(`repository`,`metadataPrefix`),
-	UNIQUE(`id`)
-);
-EOS
-
-sub new {
-	my $self = shift->SUPER::new(@_);
-	$self->require(qw( dbh identifier baseURL ));
-	if( defined($self->id) ) {
-		foreach my $type (keys %SETS_SCHEMA) {
-			my $fn = lc($type) . '_table';
-			my $tblname = $type . "_" . $self->id;
-			$self->$fn($tblname);
-		}
-	}
-	$self;
-}
-
-sub create_tables {
-	my $self = shift;
-	my $dbh = $self->dbh;
-	while(my( $type, $schema ) = each %SETS_SCHEMA) {
-		my $tblname = $type . "_" . $self->id;
-		unless( $dbh->table_exists( $tblname )) {
-			$dbh->do(sprintf('CREATE TABLE `%s` %s',
-				$tblname,
-				$schema
-			)) or Carp::confess( "Error creating table [$tblname]: $!" );
-		}
-	}
-}
-
-sub commit {
-	my $self = shift;
-	$self->dbh->updateRepository( $self );
-}
-
-sub remove
-{
-	my( $self ) = @_;
-	my $dbh = $self->dbh;
-	my $id = $self->id;
-
-	$dbh->lock($id);
-	$_->remove for $self->listMetadataFormats;
-	while(my( $type, $schema ) = each %SETS_SCHEMA) {
-		my $tblname = $type . "_" . $self->id;
-		$dbh->do("DROP TABLE IF EXISTS $tblname");
-	}
-	$dbh->do("DELETE FROM Repositories WHERE `id`=?",{},$id);
-	$dbh->unlock($id);
-}
-
-sub lock {
-	shift->dbh->lock(@_);
-}
-
-sub unlock {
-	shift->dbh->unlock(@_);
-}
-
-sub getLock {
-	my $self = shift;
-	$self->dbh->getLock($self,@_);
-}
-
-sub addReport {
-	my $self = shift;
-	my $rec = shift;
-	$rec->{repository} = $self->id;
-	return Celestial::Report->addReport( $self->dbh, $rec );
-}
-
-sub getReport {
-	my $self = shift;
-	return Celestial::Report->getReport( $self->dbh, $self, @_ );
-}
-
-sub listReports {
-	my $self = shift;
-	return Celestial::Report->listReports( $self->dbh, $self );
-}
-
-sub removeReport {
-	my $self = shift;
-	return Celestial::Report->removeReport( $self->dbh, $self, @_ );
-}
-
-sub addMetadataFormat {
-	my $self = shift;
-	return $self->dbh->addMetadataFormat($self,@_);
-}
-
-sub getMetadataFormat {
-	my $self = shift;
-	return $self->dbh->getMetadataFormat($self,@_);
-}
-
-sub listMetadataFormats {
-	my $self = shift;
-	return $self->dbh->listMetadataFormats($self);
-}
-
-sub resetFormat {
-	my ($self,$mdf) = @_;
-	$self->dbh->resetFormat($mdf);
-}
-
-sub disableFormat {
-	my ($self,$mdf) = @_;
-	$self->dbh->disableFormat($mdf);
-}
-
-sub enableFormat {
-	my ($self,$mdf) = @_;
-	$self->dbh->enableFormat($self,$mdf);
-}
-
-sub addSet($$) {
-	my( $self, $set ) = @_;
-	my $dbh = $self->dbh;
-
-	my $id;
-	my $tblname = $self->sets_table;
-
-	my $sth = $dbh->prepare("SELECT `id` FROM $tblname WHERE `setSpec`=?");
-	$sth->execute($set->setSpec) or Carp::confess( "Error adding set: $!" );
-	($id) = $sth->fetchrow_array;
-	$sth->finish;
-
-	if( defined($id) ) {
-		$sth = $dbh->prepare("UPDATE $tblname SET `setName`=? WHERE `id`=?");
-		$sth->execute($set->setName, $id)
-			or Carp::confess( "Error updating set: $!" );
-	} else {
-		$sth = $dbh->prepare("INSERT $tblname (`setSpec`,`setName`) VALUES (?,?)");
-		$sth->execute($set->setSpec,$set->setName)
-			or Carp::confess( "Error adding set: $!" );
-		$id = $sth->{mysql_insertid};
-		unless( defined($id) ) {
-			Carp::confess( "Error getting id for new set: $!" );
-		}
-	}
-	$sth->finish;
-
-	$self->addSetDescriptions($id,$set->setDescription);
-
-	return $id;
-}
-
-sub addSetDescriptions($$@) {
-	my ($self, $id, @descriptions) = @_;
-	my $dbh = $self->dbh;
-
-	my $tblname = $self->setdescriptions_table;
-
-	$dbh->do("DELETE FROM $tblname WHERE `set`=?",{},$id)
-		or die $!;
-	my $sth = $dbh->prepare("INSERT INTO $tblname (`set`,`description`) VALUES (?,?)");
-	for( @descriptions ) {
-		$sth->execute($id,$_->dom->toString) or die $!;
-	}
-}
-
-sub addSetMembership($$$)
-{
-	my ($self, $setid, $recid) = @_;
-
-	my $tblname = $self->setmemberships_table;
-
-	$self->dbh->do("REPLACE $tblname (`set`,`record`) VALUES (?,?)",{},
-		$setid,
-		$recid,
-	) or die $!;
-}
-
-sub getSetId($$) {
-	my( $self, $setSpec ) = @_;
-
-	my $tblname = $self->sets_table;
-
-	my $sth = $self->dbh->prepare("SELECT `id` FROM $tblname WHERE `setSpec`=?");
-	$sth->execute($setSpec) or die $!;
-	my ($id) = $sth->fetchrow_array or return undef;
-	$sth->finish;
-	return $id;
-}
-
-sub listSetIds($$) {
-	my ($self, $set) = @_;
-	$set =~ s/\%/\_/sg; # Make sure we don't get a %...% query
-	
-	my $tblname = $self->sets_table or die "Sets table name isn't defined";
-	my @ids;
-	
-	my $sth = $self->dbh->prepare("SELECT `id` FROM $tblname WHERE setSpec=? OR setSpec like ?");
-	$sth->execute($set,$set . ':%') or die $!;
-	while( my ($id) = $sth->fetchrow_array ) {
-		push @ids, $id;
-	}
-	$sth->finish;
-	
-	return @ids;
-}
-
-=back
-
-=head1 NAME
-
-Celestial::MetadataFormat - Encapsulates a metadata format
-
-=head1 SYNOPSIS
-
-	$mdf = $repo->getMetadataFormat('oai_dc');
-
-	$rec = new HTTP::OAI::Record(...);
-
-	$mdf->addProvenance($rec);
-	$mdf->addRecord($rec);
-	$rec = $mdf->getRecord($mdf->getRecordId('oai:smurf:0001'));
-
-=head1 METHODS
-
-=over 4
-
-=item $mdf->metadataPrefix
-
-=item $mdf->metadataNamespace
-
-=item $mdf->schema
-
-=cut
-
-package Celestial::MetadataFormat;
-
-use vars qw(@ISA $TABLE_SCHEMA @COLUMNS @DATE_COLUMNS);
-@ISA = qw(Celestial::Encapsulation);
-
-@COLUMNS = qw( id repository metadataPrefix schema metadataNamespace lastToken cardinality storage );
-@DATE_COLUMNS = qw( locked lastHarvest lastFullHarvest lastAttempt lastFulltextHarvest );
-
-$TABLE_SCHEMA = <<EOS;
-(
-  `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `datestamp` DATETIME,
-  `accession` DATETIME,
-  `cursor` BIGINT UNSIGNED,
-  `identifier` BLOB NOT NULL,
-  `status` ENUM('deleted'),
-  `header` LONGBLOB NOT NULL,
-  `metadata` LONGBLOB,
-  `about` LONGBLOB,
-  PRIMARY KEY  (`id`),
-  KEY (`cursor`),
-  KEY `identifier` (`identifier`(128)),
-  KEY (`accession`,`status`)
-) TYPE=MyISAM;
-EOS
-
-sub new
-{
-	my $self = shift->SUPER::new(@_);
-	$self->require(qw( dbh repository ));
-	$self->table(sprintf('Records_%d_%d', $self->repository->id, $self->id))
-		if defined($self->id);
-	$self;
-}
-
-sub create_tables
-{
-	my $self = shift;
-	Carp::confess("id must be set") unless defined($self->id);
-	$self->table(sprintf('Records_%d_%d', $self->repository->id, $self->id));
-	if( !$self->dbh->table_exists($self->table) ) {
-		$self->dbh->do(sprintf('CREATE TABLE `%s` %s',$self->table,$TABLE_SCHEMA))
-			or Carp::confess('Error creating table [' . $self->table . ']');
-	}
-}
-
-sub commit
-{
-	my( $self ) = @_;
-	$self->dbh->updateMetadataFormat($self);
-}
-
-sub remove
-{
-	my( $self ) = @_;
-	my $dbh = $self->dbh;
-	my $id = $self->id;
-
-	$dbh->do("DELETE FROM MetadataFormats WHERE `id`=?",{},$id);
-	$dbh->do("DELETE FROM harvestLog WHERE `metadataFormat`=?",{},$id);
-	$dbh->do("DROP TABLE IF EXISTS ".$self->table);
-}
-
-sub lock
-{
-	my( $self ) = @_;
-	$self->locked( $self->dbh->now );
-	$self->commit;
-}
-
-sub unlock
-{
-	my( $self ) = @_;
-	$self->locked( undef );
-	$self->commit;
-}
-
-=item $mdf->reset()
-
-Reset the harvest date (doesn't effect data).
-
-=cut
-
-sub reset
-{
-	my( $self ) = @_;
-	my $dbh = $self->dbh;
-	$self->removeAllErrors;
-	$self->lastHarvest(undef);
-	$self->lastFullHarvest(undef);
-	$self->lastToken(undef);
-	$self->commit;
-}
-
-=item $mdf->removeAllRecords()
-
-Remove all data and reset the harvest date.
-
-=cut
-
-sub removeAllRecords
-{
-	my( $self ) = @_;
-	$self->cardinality(0);
-	$self->reset; # Force re-harvest of everything
-	$self->dbh->do("DELETE FROM ".$self->table)
-		or die $!;
-}
-
-sub removeAllErrors
-{
-	my( $self ) = @_;
-	my $dbh = $self->dbh;
-	$dbh->do("DELETE FROM harvestLog WHERE `metadataFormat`=?",{},$self->id);
-}
-
-=item $name = table([$name])
-
-Get the table name for this metadata format.
-
-=cut
-
-sub addProvenance {
-	my $self = shift;
-	$self->dbh->addProvenance(
-		repository=>$self->repository,
-		metadataFormat=>$self,
-		record=>shift,
-	);
-}
-
-sub addRecord($$) {
-	my $self = shift;
-	$self->dbh->addRecord($self, shift);
-}
-
-sub updateRecord($$) {
-	my $self = shift;
-	$self->dbh->updateRecord($self, shift);
-}
-
-sub getRecord {
-	my $self = shift;
-	$self->dbh->getRecord($self,@_);
-}
-
-sub getRecordId {
-	my $self = shift;
-	$self->dbh->getRecordId($self,shift);
-}
-
-sub getRecordAccession {
-	my $self = shift;
-	$self->dbh->getRecordAccession($self,shift);
-}
-
-sub getFulltext {
-	my $self = shift;
-	return $self->dbh->getFulltext($self);
-}
-
-sub listErrors {
-	my $self = shift;
-	return $self->dbh->listErrors($self);
-}
-
-=back
-
-=cut
-
-package Celestial::Set;
-
-use vars qw(@ISA);
-@ISA = qw(Celestial::Encapsulation);
-
-sub new {
-	my $self = shift->SUPER::new(@_);
-	$self->require(qw( dbh id ));
-	$self;
-}
-
-=head1 NAME
-
-Celestial::Fulltext
-
-=head1 DESCRIPTION
-
-Represents a Fulltext table that contains all of the full-text URLs and formats for a repository. The id of the Fulltext table is the id of the oai_dc metadata format (although the full-text may not actually be linked from DC).
-
-=head1 METHODS
-
-=over 4
-
-=cut
-
-package Celestial::Fulltext;
-
-use vars qw(@ISA $TABLE_SCHEMA @COLUMNS @DATE_COLUMNS);
-@ISA = qw(Celestial::Encapsulation);
-
-$TABLE_SCHEMA = "
-(
-`record` INT UNSIGNED NOT NULL,
-`datestamp` DATETIME NOT NULL,
-`url` VARCHAR(255) NOT NULL,
-`mimetype` VARCHAR(64) NOT NULL,
-`puid` VARCHAR(64),
-`format` VARCHAR(255) NOT NULL,
-PRIMARY KEY(`record`,`url`,`format`)
-)
-";
-
-@COLUMNS = qw( record url mimetype puid format );
-@DATE_COLUMNS = qw( datestamp );
-
-sub new {
-	my $self = shift->SUPER::new(@_);
-	$self->require(qw( dbh id ));
-	$self->table("Fulltext_" . $self->id);
-	$self->create_tables;
-	$self;
-}
-
-sub create_tables
-{
-	my $self = shift;
-	$self->table("Fulltext_" . $self->id);
-	if( !$self->dbh->table_exists($self->table) ) {
-		$self->dbh->do(sprintf('CREATE TABLE %s %s',
-			$self->table,
-			$TABLE_SCHEMA
-		)) or Carp::confess "Error creating table ".$self->table.": $!";
-	}
-}
-
-=item addFulltext($rec)
-
-Add a Fulltext record using following fields ($rec is a hash ref):
-
-	record	Record id
-	datestamp	Last update to the full-text
-	url	Full-text URL
-	mimetype	Server defined mime-type
-	puid	Pronom unique id
-	format	English-language format description
-
-=cut
-
-sub addFulltext {
-	my( $self, $rec ) = @_;
-	my $dbh = $self->dbh;
-
-	my @fields = qw( record datestamp url mimetype puid format );
-	$dbh->do("REPLACE ".$self->table." (".join(',',@fields).") VALUES(".join(',',map{'?'}@fields).")",{},
-		@$rec{@fields})
-		or die "Error writing to ".$self->table.": $!";
-}
-
-sub removeFulltext {
-	my( $self, $id ) = @_;
-
-	$self->dbh->do("DELETE FROM ".$self->table." WHERE `record`=?", {}, $id)
-}
-
-sub lastHarvest {
-	my $self = shift;
-	return $self->dbh->lastFulltextHarvest($self, @_);
-}
-
-=back
-
-=head1 NAME
-
-Celestial::Report
-
-=head1 METHODS
-
-=over 4
-
-=cut
-
-package Celestial::Report;
-
-use vars qw(@ISA @COLUMNS @DATE_COLUMNS);
-@ISA = qw(Celestial::Encapsulation);
-
-@COLUMNS = qw(repository email confirmed frequency include);
-@DATE_COLUMNS = qw(previous);
-
-sub new
-{
-	my $self = shift->SUPER::new(@_);
-	$self->require(qw( dbh repository email frequency include ));
-	$self;
-}
-
-sub addReport
-{
-	my( $self, $dbh, $rec ) = @_;
-	$rec->{repository} = $rec->{repository}->id
-		if ref($rec->{repository});
-	$dbh->do("REPLACE Reports (".join(',',@COLUMNS,@DATE_COLUMNS).") VALUES (".join(',',map {'?'} @COLUMNS,@DATE_COLUMNS).")", {},
-		@$rec{@COLUMNS,@DATE_COLUMNS}
-	) or Carp::confess($!);
-}
-
-sub removeReport
-{
-	my( $self, $dbh, $repo, $email ) = @_;
-	$dbh->do("DELETE FROM Reports WHERE repository=? AND email=?",{},$repo->id,$email) or Carp::confess($!);
-}
-
-sub getReport
-{
-	my( $self, $dbh, $repo, $email ) = @_;
-	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).",DATE_FORMAT(`previous`,'$Celestial::DBI::DATE_FORMAT') AS previous FROM Reports WHERE `repository`=? AND `email`=?");
-	$sth->execute($repo->id,$email) or Carp::confess($!);
-	my $row = $sth->fetchrow_hashref or return;
-	$sth->finish;
-	return Celestial::Report->new({
-		%$row,
-		dbh=>$dbh,
-		repository=>$repo,
-	});
-}
-
-sub listReports
-{
-	my( $self, $dbh, $repo ) = @_;
-	my @reps;
-	my $sth = $dbh->prepare("SELECT ".join(',',@COLUMNS).",DATE_FORMAT(`previous`,'$Celestial::DBI::DATE_FORMAT') AS previous FROM Reports WHERE `repository`=?");
-	$sth->execute($repo->id) or Carp::confess($!);
-	while( my $row = $sth->fetchrow_hashref ) 
-	{
-		push @reps, Celestial::Report->new({
-				%$row,
-				dbh=>$dbh,
-				repository=>$repo,
-				});
-	}
-	$sth->finish;
-	return @reps;
-}
-
-sub isDue
-{
-	my $self = shift;
-	my $sth = $self->dbh->prepare("SELECT 1 FROM Reports WHERE repository=? AND email=? AND confirmed is not Null AND (previous is Null OR previous + INTERVAL frequency DAY <= NOW())");
-	$sth->execute( $self->repository->id, $self->email );
-	my ($r) = $sth->fetchrow_array;
-	$sth->finish;
-	return $r;
-}
-
-sub touch
-{
-	my $self = shift;
-	$self->dbh->do("UPDATE Reports SET previous=NOW() WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
-}
-
-sub reset
-{
-	my $self = shift;
-	$self->dbh->do("UPDATE Reports SET previous=Null WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
-}
-
-sub confirm
-{
-	my $self = shift;
-	$self->dbh->do("UPDATE Reports SET confirmed='' WHERE repository=? AND email=?",{},$self->repository->id,$self->email);
-}
-
-sub commit
-{
-	my $self = shift;
-	my $rec;
-	for(@COLUMNS,@DATE_COLUMNS) {
-		$rec->{ $_ } = $self->$_;
-	}
-	$self->addReport($self->dbh, $rec);
-}
-
-=item $rep->recordsReport
-
-Returns a hash of metadata formats and total records since previous report.
-
-=cut
-
-sub recordsReport
-{
-	my $self = shift;
-	my $dbh = $self->dbh;
-	my $repo = $self->repository;
-	my %recs;
-	my $from = $self->previous || 0;
-	foreach my $mdf ($repo->listMetadataFormats)
-	{
-		# We already have a record count
-		if( $from == 0 ) {
-			$recs{$mdf->metadataPrefix} = $mdf->cardinality;
-			next;
-		}
-		my $sth = $dbh->prepare("SELECT COUNT(*) FROM ".$mdf->table." WHERE `datestamp`>=?");
-		$sth->execute($from) or Carp::confess($!);
-		my $row = $sth->fetchrow_arrayref;
-		$recs{$mdf->metadataPrefix} = $row->[0];
-		$sth->finish;
-	}
-	return %recs;
-}
-
-sub errorsReport
-{
-	my $self = shift;
-	my $dbh = $self->dbh;
-	my $repo = $self->repository;
-	my %recs;
-	my $from = $self->previous || 0;
-	foreach my $mdf ($repo->listMetadataFormats)
-	{
-		my $sth = $dbh->prepare("SELECT CONCAT_WS(' ',`datestamp`,`error`) FROM harvestLog WHERE `metadataFormat`=? AND `datestamp`>=?");
-		$sth->execute($mdf->id, $from) or Carp::confess($!);
-		while( my $row = $sth->fetchrow_arrayref )
-		{
-			push @{$recs{$mdf->metadataPrefix}}, $row->[0];
-		}
-		$sth->finish;
-	}
-	return %recs;
-}
-
-sub fulltextsReport
-{
-	my $self = shift;
-	my $dbh = $self->dbh;
-	my $repo = $self->repository;
-	my %fmts;
-	my $from = $self->previous || 0;
-	my $mdf = $repo->getMetadataFormat('oai_dc') or return;
-	my $ftt = $mdf->getFulltext or return;
-	my $sth = $dbh->prepare("SELECT `format`,COUNT(*) FROM ".$ftt->table." WHERE `datestamp`>=? GROUP BY `format`");
-	$sth->execute($from) or Carp::confess($!);
-	while( my $row = $sth->fetchrow_arrayref )
-	{
-		$fmts{$row->[0]} = $row->[1];
-	}
-	$sth->finish;
-	return %fmts;
-}
-
-=back
-
-=cut
-
-package Celestial::Error;
-
-use overload "<>" => \&_next;
-
-use vars qw(@ISA @FIELDS);
-@ISA = qw(Celestial::Encapsulation);
-
-@FIELDS = qw(metadataFormat datestamp url error errorResponse);
-
-sub new
-{
-	my $self = shift->SUPER::new(@_);
-	$self->require(qw( dbh metadataFormat ));
-	$self;
-}
-
-sub DESTROY
-{
-	my $self = shift;
-	$self->_sth->finish if defined($self->_sth);
-}
-
-sub _next
-{
-	my $self = shift;
-	my $row = $self->_sth->fetchrow_hashref or return;
-	return Celestial::Error->new({
-		%$row,
-		dbh=>$self->dbh,
-		metadataFormat=>$self->metadataFormat
-	});
-}
 
 1;

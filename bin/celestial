@@ -76,8 +76,8 @@ $HTTP_TIMEOUT = 300; # In seconds
 $MAX_FILE_SIZE = 1024*1024*10; # 10MB
 
 $JAVA = '/usr/java/jdk1.5.0_06/bin/java';
-$DROID = '/home/eprints/share/DROID/DROID.jar';
-$DROID_SIG = '/home/eprints/share/DROID/DROID_SignatureFile.xml';
+$DROID = '/home/devel/share/DROID/DROID.jar';
+$DROID_SIG = '/home/devel/share/DROID/DROID_SignatureFile.xml';
 
 use Getopt::Long;
 use Pod::Usage;
@@ -362,6 +362,7 @@ sub update_repository {
 	if( my $oai_dc = $repo->getMetadataFormat( 'oai_dc' )) {
 		my $ftt = $oai_dc->getFulltext();
 		my $startTime = $dbh->now();
+		$ftt->synchronize($oai_dc); # Remove orphaned records
 		my $st = harvest_Fulltext( $dbh,
 			harvestAgent => $ha,
 			repository => $repo,
@@ -594,7 +595,7 @@ sub harvest_Fulltext
 		{
 			$st = $ft->server_type;
 			unless( $st ) {
-				warn "Can't harvest full-text from ".$repo->identifier.": type unknown\n";
+				warn "Can't harvest full-text from ".$repo->identifier.": repository type unsupported\n" if $opt_verbose;
 				last;
 			}
 		}
@@ -676,12 +677,16 @@ sub timestamp {
 
 sub run_droid {
 	my $fn = shift;
-	my $tmp = File::Temp->new( CLEANUP => 1 );
-	system("$JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn >/dev/null");
+	my $tmp = File::Temp->new( UNLINK => 1 );
+	my $r = system("$JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn >/dev/null");
+	if( $r != 0 )
+	{
+		die("Error running $JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn: $?");
+	}
 	my $doc = XML::LibXML->new->parse_file("$tmp.xml");
+	unlink("$tmp.xml");
 	my $xc = XML::LibXML::XPathContext->new( $doc );
 	$xc->registerNs('rc','http://www.nationalarchives.gov.uk/pronom/FileCollection');
-	unlink("$tmp.xml");
 	my @formats;
 	for($xc->findnodes("//rc:FileFormatHit")) {
 		my %attr;
