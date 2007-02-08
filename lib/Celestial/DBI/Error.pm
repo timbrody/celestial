@@ -24,7 +24,7 @@ sub _next
 {
 	my $self = shift;
 	my $row = $self->_sth->fetchrow_hashref or return;
-	return Celestial::Error->new({
+	return Celestial::DBI::Error->new({
 		%$row,
 		dbh=>$self->dbh,
 		metadataFormat=>$self->metadataFormat

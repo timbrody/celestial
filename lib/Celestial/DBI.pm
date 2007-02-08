@@ -866,12 +866,14 @@ sub updateMetadata
 		$ab = $dom->toString;
 	}
 
+	my( $id, $accession );
+	eval {
 	$self->do("LOCK TABLES $tblname WRITE");
 
 	my $sth = $self->prepare("SELECT `id`,`accession` FROM $tblname WHERE `identifier`=?");
 	$sth->execute($rec->identifier)
 		or die "Error writing to $tblname: $!";
-	my( $id, $accession ) = $sth->fetchrow_array;
+	( $id, $accession ) = $sth->fetchrow_array;
 
 	# Remove the existing record
 	if( defined($id) ) {
@@ -892,7 +894,9 @@ sub updateMetadata
 	$self->do("UPDATE $tblname SET `datestamp`=`datestamp`, `cursor`=CONCAT(DATE_FORMAT(`datestamp`,'\%Y\%m\%d\%H\%i\%S'),LPAD(MOD(`id`,1000),3,'0')) WHERE `id`=?",{},$id)
 		or die "Error writing to $tblname: $!";
 
+	}; # End of Table Lock
 	$self->do("UNLOCK TABLES");
+	die $@ if $@;
 
 	# Process sets
 	for ($rec->header->setSpec) {

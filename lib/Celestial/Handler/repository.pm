@@ -41,6 +41,19 @@ sub body {
 
 	$body->appendChild( dataElement( 'h2', $repo->identifier ));
 
+	$body->appendChild( dataElement( 'iframe', dataElement( 'b', 'Requires frames support' ), {
+		width => 700,
+		height => 200,
+		src => $CGI->as_link( 'identifiers',
+			format => 'graph',
+			baseURL => $repo->baseURL,
+			width => 700,
+			height => 200
+		)}
+	));
+
+	$body->appendChild( dataElement( 'p', $CGI->msg( 'identifiers.graph.caption' )));
+
 	$self->_oai_links($body, $CGI, $repo);
 
 	$body->appendChild( dataElement( 'h3', $CGI->msg( 'repository.subtitle.status' ) ));

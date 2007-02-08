@@ -56,6 +56,7 @@ use Celestial::Handler::repository;
 use Celestial::Handler::static;
 use Celestial::Handler::oai;
 use Celestial::Handler::listfriends;
+use Celestial::Handler::identifiers;
 
 sub handler
 {

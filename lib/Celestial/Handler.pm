@@ -81,7 +81,9 @@ sub page {
 }
 
 sub title {
-	shift->msg( 'error.404' );
+	my( $self, $CGI ) = @_;
+
+	$CGI->msg( 'error.404' );
 }
 
 sub body {
@@ -95,17 +97,19 @@ sub navbar { 0 }
 sub dataElement {
 	my( $name, $value, $attr ) = @_;
 	Carp::confess( "dom not defined" ) unless $dom;
-	$attr ||= {};
 	my $node = $dom->createElement($name);
 	if( defined($value) ) {
-		if( ref($value) =~ /^XML::/ ) {
-			$node->appendChild( $value);
-		} elsif( ref($value) or length($value) > 0 ) {
-			$node->appendText($value);
+		$value = [$value] unless ref($value) eq 'ARRAY';
+		for (@$value) {
+			if( ref($_) =~ /^XML::/ ) {
+				$node->appendChild( $_ );
+			} else {
+				$node->appendText($_);
+			}
 		}
 	}
-	while(my( $key, $value ) = each %$attr ) {
-		$node->setAttribute( $key, $value );
+	while(my( $k, $v ) = each %{$attr||{}} ) {
+		$node->setAttribute( $k, $v );
 	}
 	return $node;
 }

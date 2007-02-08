@@ -255,6 +255,38 @@ sub getSetId($$) {
 	return $id;
 }
 
+sub getSet($$) {
+	my( $self, $id ) = @_;
+
+	my $set = HTTP::OAI::Set->new();
+
+	my $tblname = $self->sets_table;
+
+	my $sth = $self->dbh->prepare("SELECT `setSpec`,`setName` FROM $tblname WHERE `id`=?");
+	$sth->execute($id) or die $!;
+	my( $spec, $name ) = $sth->fetchrow_array or return;
+
+	$set->setSpec( $spec );
+	$set->setName( $name );
+
+	$tblname = $self->setdescriptions_table;
+	
+	$sth = $self->dbh->prepare("SELECT `description` FROM $tblname WHERE `set`=?");
+	$sth->execute($id) or die $!;
+	my @descs;
+	while(my( $desc ) = $sth->fetchrow_array) {
+		push @desc, $desc;
+	}
+
+	for(@descs) {
+		$set->setDescription(HTTP::OAI::Metadata->new(
+			dom => XML::LibXML->new->parse_string($desc)
+		));
+	}
+
+	return $set;
+}
+
 sub listSetIds($$) {
 	my ($self, $set) = @_;
 	$set =~ s/\%/\_/sg; # Make sure we don't get a %...% query
