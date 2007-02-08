@@ -460,11 +460,18 @@ sub svg_log_y_axis
 
 	my $step = int($dy/10);
 	for(my $i = 1; $i < $max; $i = $i."0" ) {
+		$ctx->appendChild( dataElement( 'rect', undef, {
+			x => 16,
+			y => ($dy-log10($i+1))*$scale_y,
+			width => 4,
+			height => 1,
+			fill => 'black',
+		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
-			x => 10,
+			x => 14,
 			y => ($dy-log10($i+1))*$scale_y+5,
 			#y => ($dy-$i)*$scale_y,
-			style => 'text-align:right;text-anchor:middle;',
+			style => 'text-align:right;text-anchor:end;',
 		}));
 	}
 	
@@ -488,10 +495,17 @@ sub svg_y_axis
 
 	my $step = int($dy/10);
 	for(my $i = 1; $i < $max; $i += $step ) {
+		$ctx->appendChild( dataElement( 'rect', undef, {
+			x => 16,
+			y => ($dy-$i)*$scale_y,
+			width => 4,
+			height => 1,
+			fill => 'black',
+		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
-			x => 10,
+			x => 14,
 			y => ($dy-$i)*$scale_y+5,
-			style => 'text-align:right;text-anchor:middle;',
+			style => 'text-align:right;text-anchor:end;',
 		}));
 	}
 	
