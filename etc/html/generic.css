@@ -283,3 +283,8 @@ td.input {
 	text-decoration: underline;
 	color: #00f;
 }
+
+iframe {
+	border: none;
+	padding: 0;
+}

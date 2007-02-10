@@ -48,6 +48,7 @@ sub page
 	$width = 800 if !$width or $width =~ /\D/;
 	$height = 300 if !$height or $height =~ /\D/;
 	my $set = $vars{set};
+	my $dna = $vars{dna};
 
 	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
 		or return $self->error( $CGI, "baseURL doesn't match any registered repository: $baseURL" );
@@ -139,7 +140,7 @@ sub page
 		my $w = $width;
 		my $h = $height;
 
-		my $svg = $self->svg($w,$h);
+		my $svg = $self->svg($CGI,$w,$h);
 
 		my $x = 0; my $y = 0;
 		my $max_x = $w; my $max_y = $h;
@@ -192,6 +193,8 @@ sub page
 
 		if( $logy ) {
 			svg_log_y_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
+		} elsif( $dna ) {
+			svg_dna_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
 		} else {
 			svg_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
 		}
@@ -355,6 +358,10 @@ sub body
 
 	my $body = dataElement( 'div' );
 
+	$body->appendChild( dataElement( 'a', dataElement( 'h2', $repo->identifier ), {
+		href => $baseURL
+	}));
+
 	my $img_link = URI->new('','http');
 	$img_link->query_form(%{{%vars, format=>'graph', dataset=>''}});
 	my $set_link = URI->new('','http');
@@ -490,7 +497,7 @@ sub sets_summary
 
 sub svg
 {
-	my( $self, $w, $h ) = @_;
+	my( $self, $CGI, $w, $h ) = @_;
 	my $dom = $self->dom;
 	
 	$dom->setStandalone( 0 );
@@ -507,6 +514,9 @@ sub svg
 	});
 
 	$dom->setDocumentElement( $svg );
+
+	$svg->appendChild( $self->script( $CGI ));
+	$svg->setAttribute( 'onload', 'plotInit(evt)' );
 
 	return $svg;
 }
@@ -637,7 +647,9 @@ sub svg_log_y_plot_series
 	my $scale_y = $h/$max;
 	
 	$svg->appendChild( my $plot = dataElement( 'g', undef, {
-		transform => "translate($x $y) scale($scale_x $scale_y)"
+		transform => "translate($x $y) scale($scale_x $scale_y)",
+		id => "plot",
+		_size => scalar @$data,
 	}));
 	for(my $i = 0; $i < @$data; $i++)
 	{
@@ -661,7 +673,7 @@ sub svg_log_y_plot_series
 	}
 }
 
-sub svg_plot_series
+sub svg_dna_plot_series
 {
 	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
@@ -669,7 +681,9 @@ sub svg_plot_series
 	my $scale_y = $h/$max;
 	
 	$svg->appendChild( my $plot = dataElement( 'g', undef, {
-		transform => "translate($x $y) scale($scale_x $scale_y)"
+		transform => "translate($x $y) scale($scale_x $scale_y)",
+		id => "plot",
+		_size => scalar @$data,
 	}));
 	for(my $i = 0; $i < @$data; $i++)
 	{
@@ -685,6 +699,43 @@ sub svg_plot_series
 						width => 1,
 						height => $v,
 						fill => sprintf("#%02x00%02x",$r,$b),
+						stroke => '#000',
+						'stroke-width' => '.2',
+						}), {
+					'xlink:href' => "$l",
+					target => "_top",
+					}));
+	}
+}
+
+sub svg_plot_series
+{
+	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
+	
+	my $scale_x = $w/@$data;
+	my $scale_y = $h/$max;
+	
+	$svg->appendChild( my $plot = dataElement( 'g', undef, {
+		transform => "translate($x $y) scale($scale_x $scale_y)",
+		id => "plot",
+		_size => scalar @$data,
+	}));
+	for(my $i = 0; $i < @$data; $i++)
+	{
+		my $v = $data->[$i] or next;
+		my %qry = $l->query_form;
+		$qry{dataset} = $labels->[$i];
+		$l->query_form(%qry);
+		my $r = int(255*$v/$max);
+		my $b = 255-int(255*$v/$max);
+		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
+						x => $i,
+						y => $max-$v,
+						width => 1,
+						height => $v,
+						fill => sprintf("#%02x00%02x",$r,$b),
+						stroke => '#000',
+						'stroke-width' => '.2',
 						}), {
 					'xlink:href' => "$l",
 					target => "_top",
@@ -734,6 +785,18 @@ sub error
 	print $err;
 
 	return 0;
+}
+
+sub script
+{
+	my( $self, $CGI ) = @_;
+
+	my $script = dataElement( 'script', undef, {
+		type => 'text/ecmascript',
+		'xlink:href' => $CGI->as_link( 'static/ajax/handler/identifiers.js' ),
+	});
+
+	return $script;
 }
 
 1;

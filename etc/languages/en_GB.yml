@@ -147,3 +147,6 @@ report.confirm.message: >
 
 
  If you have been sent this message in error please accept our apologies and you can safely ignore this email.
+
+identifiers.title: Breakdown of Records
+identifiers.graph.caption: Records created per day (SVG image)
