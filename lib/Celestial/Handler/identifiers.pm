@@ -33,26 +33,36 @@ sub page
 	$url =~ s/;/&/g;
 	my %vars = URI->new($url)->query_form;
 
-	my $logy = $vars{logy} || 1;
+	my $logy = defined($vars{logy}) ? $vars{logy} : 1;
 	my $from = $vars{from};
 	my $until = $vars{until};
 	$from ||= $self->now(" - INTERVAL 1 YEAR");
 	$until ||= $self->now('');
-	my $baseURL = $vars{baseURL} or die "Requires baseURL";
+	my $baseURL = $vars{baseURL} or return $self->error( $CGI, "Requires baseURL");
 	my $format = $vars{format} || 'table';
 	my $dataset = $vars{dataset};
 	my $width = $vars{width} || 0;
 	my $height = $vars{height} || 0;
 	$width = 800 if !$width or $width =~ /\D/;
 	$height = 300 if !$height or $height =~ /\D/;
+	my $set = $vars{set};
 
 	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
-		or die "baseURL doesn't match any registered repository: $baseURL";
+		or return $self->error( $CGI, "baseURL doesn't match any registered repository: $baseURL" );
 
 	my $mdf = $repo->getMetadataFormat('oai_dc')
-		or die "Repository does not have oai_dc: $baseURL";
+		or return $self->error( $CGI, "Repository does not have oai_dc: $baseURL");
+
+	if( defined($set) and length($set) ) {
+		unless(defined($set = $repo->getSetId($set))) {
+			$self->error( $CGI, "Set not found in repository: $vars{set}");
+		}
+	}
 
 	my $table = $mdf->table;
+	my $sm_table = $repo->setmemberships_table;
+
+	my $tables = "`$table`";
 
 	my @logic;
 	my @values;
@@ -70,11 +80,16 @@ sub page
 		push @logic, "`accession` >= ? AND `accession` < ? + INTERVAL 1 DAY";
 		push @values, $dataset, $dataset;
 	}
+	if( defined $set ) {
+		push @logic, "`set` = $set";
+		$tables .= " INNER JOIN `$sm_table` ON `id`=`record`";
+	}
 
 	if( $format eq 'graph' )
 	{
-		my $sth = $dbh->prepare("SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS `d`,COUNT(*) AS `c` FROM `$table`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"); 
-		$sth->execute(@values) or die $dbh->errstr;
+		my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
+		my $sth = $dbh->prepare($SQL);
+		$sth->execute(@values) or $self->error( $CGI, $dbh->errstr);
 
 		my @DATA = ([],[]);
 		my $max = 0;
@@ -92,9 +107,28 @@ sub page
 				splice(@{$DATA[1]}, $i+1, 0, 0);
 				$n = $self->day_inc($n);
 				if( @{$DATA[0]} > 10000 ) {
-					die "Internal Error: Can't plot more than 10000 data points\n";
+					$self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
 				}
 
+			}
+		}
+
+		if( $from ) {
+			for(my $i = $DATA[0]->[0]; $DATA[0]->[0] > $from; $i = $self->day_dec($i)) {
+				unshift @{$DATA[0]}, $i;
+				unshift @{$DATA[1]}, 0;
+				if( @{$DATA[0]} > 10000 ) {
+					$self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+				}
+			}
+		}
+		if( $until ) {
+			for(my $i = $DATA[0]->[$#{$DATA[0]}]; $DATA[0]->[$#{$DATA[0]}] < $until; $i = $self->day_inc($i)) {
+				push @{$DATA[0]}, $i;
+				push @{$DATA[1]}, 0;
+				if( @{$DATA[0]} > 10000 ) {
+					$self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+				}
 			}
 		}
 
@@ -150,18 +184,12 @@ sub page
 					}));
 
 		my $l = URI->new('', 'http');
-		$l->query_form(
-			baseURL => $baseURL,
-			from => $from,
-			until => $until,
-			width => $width,
-			height => $height,
-		);
+		$l->query_form(%{{%vars, format => ''}});
 
 		if( $logy ) {
 			svg_log_y_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
 		} else {
-			svg_plot_series( $ctx, $l, $DATA[1], $max, $x, $y, $max_x-$x, $max_y-$y );
+			svg_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
 		}
 
 		binmode(STDOUT, ":utf8");
@@ -251,24 +279,31 @@ sub body
 	$url =~ s/;/&/g;
 	my %vars = URI->new($url)->query_form;
 
-	my $logy = $vars{logy} || 1;
+	my $logy = defined($vars{logy}) ? $vars{logy} : 1;
 	my $from = $vars{from};
 	my $until = $vars{until};
 	$from ||= $self->now(" - INTERVAL 1 YEAR");
 	$until ||= $self->now('');
-	my $baseURL = $vars{baseURL} or die "Requires baseURL";
+	my $baseURL = $vars{baseURL} or $self->error( $CGI, "Requires baseURL");
 	my $format = $vars{format} || 'table';
 	my $dataset = $vars{dataset};
 	my $width = $vars{width} || 0;
 	my $height = $vars{height} || 0;
 	$width = 800 if !$width or $width =~ /\D/;
 	$height = 300 if !$height or $height =~ /\D/;
+	my $set = $vars{set};
 
 	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
-		or die "baseURL doesn't match any registered repository";
+		or $self->error( $CGI, "baseURL doesn't match any registered repository");
 
 	my $mdf = $repo->getMetadataFormat('oai_dc')
-		or die "Repository does not have oai_dc";
+		or $self->error( $CGI, "Repository does not have oai_dc");
+
+	if( defined($set) and length($set) ) {
+		unless(defined($set = $repo->getSetId($set))) {
+			$self->error( $CGI, "Set not found in repository: $vars{set}");
+		}
+	}
 
 	my $table = $mdf->table;
 
@@ -291,17 +326,13 @@ sub body
 
 	my $body = dataElement( 'div' );
 
-	my $u = URI->new('','http');
-	$u->query_form(
-			baseURL => $baseURL,
-			format => 'graph',
-			from => $from,
-			until => $until,
-			width => $width,
-			height => $height,
-			);
+	my $img_link = URI->new('','http');
+	$img_link->query_form(%{{%vars, format=>'graph', dataset=>''}});
+	my $set_link = URI->new('','http');
+	$set_link->query_form(%vars);
+
 	$body->appendChild( dataElement('iframe', dataElement( 'b', 'Requires frames' ), {
-				src => "$u",
+				src => "$img_link",
 				type => "image/svg+xml",
 				width => $width,
 				height => $height,
@@ -316,8 +347,9 @@ sub body
 	$tr->appendChild( dataElement( 'th', 'Title' ));
 	$summary->appendChild( $tr = dataElement( 'tr' ));
 	$tr->appendChild( dataElement( 'th', 'Set Spec' ));
+	$tr->appendChild( dataElement( 'th', 'Records before Period' ));
+	$tr->appendChild( dataElement( 'th', 'Records in Period' ));
 	$tr->appendChild( dataElement( 'th', 'Records on Day' ));
-	$tr->appendChild( dataElement( 'th', 'Records in Entire Period' ));
 	$tr->appendChild( dataElement( 'th', 'Set Name' ));
 
 	my $total = 0;
@@ -332,8 +364,8 @@ sub body
 		while(my( $id, $ds, $identifier ) = $sth->fetchrow_array )
 		{
 			$total++;
-			my $u = URI->new( $baseURL );
-			$u->query_form(
+			my $oai_link = URI->new( $baseURL );
+			$oai_link->query_form(
 					verb => 'GetRecord',
 					metadataPrefix => 'oai_dc',
 					identifier => $identifier
@@ -341,7 +373,7 @@ sub body
 			$data->appendChild(my $tr = dataElement('tr'));
 			$tr->appendChild( dataElement( 'td', $ds ));
 			$tr->appendChild( dataElement( 'td', dataElement( 'a', $identifier, {
-							href => $u
+							href => $oai_link
 							})));
 			my $rec = $mdf->getRecord($id);
 			foreach my $set ($rec->header->setSpec) {
@@ -361,16 +393,23 @@ sub body
 			}
 		}
 
+		my $sets_prev = $from ?
+			$self->sets_summary($repo, $mdf, undef, $self->day_dec($from) ) :
+			{};
 		my $sets_totals = $self->sets_summary($repo, $mdf, $from, $until );
 
 		foreach my $k (sort { $sets{$b} <=> $sets{$a} } keys %sets) {
 			my $set = $repo->getSet($repo->getSetId($k));
 			my $name = $set ? $set->setName : $k;
 			$summary->appendChild( my $tr = dataElement( 'tr' ));
-			$tr->appendChild( dataElement( 'td', $k ));
-			$tr->appendChild( dataElement( 'td', $sets{$k} ));
+			$set_link->query_form(%{{%vars, set => $k}});
+			$tr->appendChild( dataElement( 'td', dataElement( 'a', $name, {
+				href => $set_link,
+			})));
+			$tr->appendChild( dataElement( 'td', $sets_prev->{$k} || '-' ));
 			$tr->appendChild( dataElement( 'td', $sets_totals->{$k} ));
-			$tr->appendChild( dataElement( 'td', $name ));
+			$tr->appendChild( dataElement( 'td', $sets{$k} ));
+			$tr->appendChild( dataElement( 'td', $k ));
 		}
 	}
 
@@ -494,7 +533,7 @@ sub svg_y_axis
 	}));
 
 	my $step = int($dy/10);
-	for(my $i = 1; $i < $max; $i += $step ) {
+	for(my $i = 0; $i < $max; $i += $step ) {
 		$ctx->appendChild( dataElement( 'rect', undef, {
 			x => 16,
 			y => ($dy-$i)*$scale_y,
@@ -595,7 +634,7 @@ sub svg_log_y_plot_series
 
 sub svg_plot_series
 {
-	my( $svg, $l, $data, $max, $x, $y, $w, $h ) = @_;
+	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
 	my $scale_x = $w/@$data;
 	my $scale_y = $h/$max;
@@ -607,7 +646,7 @@ sub svg_plot_series
 	{
 		my $v = $data->[$i] or next;
 		my %qry = $l->query_form;
-		$qry{dataset} = $data->[$i];
+		$qry{dataset} = $labels->[$i];
 		$l->query_form(%qry);
 		my $r = int(255*$v/$max);
 		my $b = 255-int(255*$v/$max);
@@ -628,6 +667,15 @@ sub day_inc
 {
 	my( $self, $d ) = @_;
 	my $sth = $self->dbh->prepare("SELECT DATE_FORMAT(? + INTERVAL 1 DAY, '\%Y\%m\%d')");
+	$sth->execute($d) or die $self->dbh->errstr;;
+	($d) = $sth->fetchrow_array;
+	return $d;
+}
+
+sub day_dec
+{
+	my( $self, $d ) = @_;
+	my $sth = $self->dbh->prepare("SELECT DATE_FORMAT(? - INTERVAL 1 DAY, '\%Y\%m\%d')");
 	$sth->execute($d) or die $self->dbh->errstr;;
 	($d) = $sth->fetchrow_array;
 	return $d;
