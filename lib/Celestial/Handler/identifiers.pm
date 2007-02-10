@@ -17,6 +17,8 @@ use Text::Wrap;
 use XML::LibXML;
 use HTTP::OAI::Metadata::OAI_DC;
 
+our $YMD = '%Y%m%d';
+
 sub title
 {
 	my( $self, $CGI ) = @_;
@@ -55,12 +57,13 @@ sub page
 
 	if( defined($set) and length($set) ) {
 		unless(defined($set = $repo->getSetId($set))) {
-			$self->error( $CGI, "Set not found in repository: $vars{set}");
+			return $self->error( $CGI, "Set not found in repository: $vars{set}");
 		}
 	}
 
 	my $table = $mdf->table;
 	my $sm_table = $repo->setmemberships_table;
+	my $sets_table = $repo->sets_table;
 
 	my $tables = "`$table`";
 
@@ -89,7 +92,8 @@ sub page
 	{
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
 		my $sth = $dbh->prepare($SQL);
-		$sth->execute(@values) or $self->error( $CGI, $dbh->errstr);
+		$sth->execute(@values)
+			or return $self->error( $CGI, $dbh->errstr);
 
 		my @DATA = ([],[]);
 		my $max = 0;
@@ -107,7 +111,7 @@ sub page
 				splice(@{$DATA[1]}, $i+1, 0, 0);
 				$n = $self->day_inc($n);
 				if( @{$DATA[0]} > 10000 ) {
-					$self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
 				}
 
 			}
@@ -118,7 +122,7 @@ sub page
 				unshift @{$DATA[0]}, $i;
 				unshift @{$DATA[1]}, 0;
 				if( @{$DATA[0]} > 10000 ) {
-					$self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
 				}
 			}
 		}
@@ -127,7 +131,7 @@ sub page
 				push @{$DATA[0]}, $i;
 				push @{$DATA[1]}, 0;
 				if( @{$DATA[0]} > 10000 ) {
-					$self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
 				}
 			}
 		}
@@ -196,63 +200,88 @@ sub page
 		$CGI->content_type('image/svg+xml');
 		print $dom->toString(1);
 	}
-	elsif( $format eq 'detail' )
+	elsif( $format eq 'csv' )
 	{
-		my $sth = $dbh->prepare("SELECT `id`,DATE_FORMAT(`accession`,'\%Y\%m\%d'),`identifier` FROM `$table`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '')); 
-		$sth->execute(@values);
+		my $sth = $dbh->prepare("SELECT DATE_FORMAT(`accession`,'$YMD') AS d,`setName`,COUNT(*) FROM `$table` AS R INNER JOIN `$sm_table` ON R.`id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d,`set`");
+		$sth->execute(@values) or die $dbh->errstr;
+		
+		my @DATA;
 
+		$CGI->content_type('text/plain');
 		my %sets;
-
-		print CGI::header('text/html'),
-			  CGI::start_html('Detail');
-
-		print "<table>";
-		while(my( $id, $ds, $identifier ) = $sth->fetchrow_array )
+		my @cols;
+		my $row = 0;
+		my $l = URI->new($CGI->url,'http');
+		$l->query_form(%{{
+			%vars,
+			format => '',
+		}});
+		while(my( $d, $set, $c) = $sth->fetchrow_array)
 		{
-			my $u = URI->new( $baseURL );
-			$u->query_form(
-					verb => 'GetRecord',
-					metadataPrefix => 'oai_dc',
-					identifier => $identifier
-					);
-			printf("<tr><td>%s</td><td>%s</td>\n",
-					$ds,
-					sprintf("<a href=\"%s\">%s</a>",
-						CGI::escapeHTML($u),
-						CGI::escapeHTML($identifier),
-						)
-				  );
-			my $rec = $mdf->getRecord($id);
-			foreach my $set ($rec->header->setSpec) {
-				$sets{$set}++;
+			if( @cols and $cols[1] != $d ) {
+				$l->query_form(%{{
+					$l->query_form,
+					dataset => $cols[1],
+				}});
+				$cols[0] = $l;
+				for(my $i = 0; $i < @cols; $i++) {
+					$DATA[$i]->[$row] = $cols[$i];
+				}
+				@cols = ();
+				$row++;
 			}
-			if( my $md = $rec->metadata ) {
-				my $dc = HTTP::OAI::Metadata::OAI_DC->new();
-				$md->set_handler(HTTP::OAI::SAXHandler->new(
-							Handler => $dc
-							));
-				$md->generate;
-				my( $link ) = @{$dc->dc->{identifier}};
-				my( $title ) = @{$dc->dc->{title}};
-				print "<td><a href=\"".CGI::escapeHTML($link)."\">".CGI::escapeHTML($title)."</a></td>";
+			my $col = $sets{$set} ||= scalar(keys %sets) + 2;
+			$cols[1] = $d;
+			$cols[2] += $c;
+			$cols[$col] = $c;
+		}
+		if( @cols ) {
+			$l->query_form(%{{
+				$l->query_form,
+				dataset => $cols[1],
+			}});
+			$cols[0] = $l;
+			for(my $i = 0; $i < @cols; $i++) {
+				$DATA[$i]->[$row] = $cols[$i];
 			}
-			print "</tr>";
 		}
-		print "</table>";
 
-		print "<table>";
-		foreach my $k (sort { $sets{$b} <=> $sets{$a} } keys %sets) {
-			my $set = $repo->getSet($repo->getSetId($k));
-			my $name = $set ? $set->setName : $k;
-			printf("<tr><td>%s</td><td>%s</td><td>%d</td></tr>", $k, $name, $sets{$k});
+		if( $from and $until ) {
+			for(my $i = $from, my $j = 0; $i <= $until; $i = $self->day_inc($i), $j++) {
+				if( $DATA[1]->[$j] != $i ) {
+					$l->query_form(%{{
+							$l->query_form,
+							dataset => $i,
+							}});
+					splice @{$DATA[0]}, $j, 0, $l;
+					splice @{$DATA[1]}, $j, 0, $i;
+					for(my $k = 2; $k < @DATA; $k++) {
+						splice @{$DATA[$k]}, $j, 0, 0;
+					}
+				}
+				if( @{$DATA[1]} > 10000 ) {
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+				}
+			}
 		}
-		print "</table>";
 
-		print CGI::end_html();
+		print "URL\tDay\tTotal Records";
+		foreach my $k (sort { $sets{$a} <=> $sets{$b} } keys %sets)
+		{
+			print "\t$k";
+		}
+		print "\n";
+		for(my $i = 0; $i < @{$DATA[0]}; $i++) {
+			my @row;
+			for(my $j = 0; $j < @DATA; $j++) {
+				push @row, $DATA[$j]->[$i];
+			}
+			print join("\t", map { defined($_) ? $_ : 0 } @row), "\n";
+		}
 	}
 	elsif( $format eq 'raw' )
 	{
-		my $sth = $dbh->prepare("SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d'),`identifier` FROM `$table`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '')); 
+		my $sth = $dbh->prepare("SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d'),`identifier` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '')); 
 		$sth->execute(@values);
 
 		$CGI->content_type('text/plain');
@@ -284,7 +313,7 @@ sub body
 	my $until = $vars{until};
 	$from ||= $self->now(" - INTERVAL 1 YEAR");
 	$until ||= $self->now('');
-	my $baseURL = $vars{baseURL} or $self->error( $CGI, "Requires baseURL");
+	my $baseURL = $vars{baseURL} or return $self->SUPER::error( $CGI, "Requires baseURL");
 	my $format = $vars{format} || 'table';
 	my $dataset = $vars{dataset};
 	my $width = $vars{width} || 0;
@@ -294,14 +323,14 @@ sub body
 	my $set = $vars{set};
 
 	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
-		or $self->error( $CGI, "baseURL doesn't match any registered repository");
+		or return $self->SUPER::error( $CGI, "baseURL doesn't match any registered repository");
 
 	my $mdf = $repo->getMetadataFormat('oai_dc')
-		or $self->error( $CGI, "Repository does not have oai_dc");
+		or return $self->SUPER::error( $CGI, "Repository does not have oai_dc");
 
 	if( defined($set) and length($set) ) {
 		unless(defined($set = $repo->getSetId($set))) {
-			$self->error( $CGI, "Set not found in repository: $vars{set}");
+			return $self->SUPER::error( $CGI, "Set not found in repository: $vars{set}");
 		}
 	}
 
@@ -694,6 +723,17 @@ sub now
 sub log10
 {
 	log(shift)/log(10);
+}
+
+sub error
+{
+	my( $self, $CGI, $err ) = @_;
+
+	$CGI->content_type( 'text/plain' );
+
+	print $err;
+
+	return 0;
 }
 
 1;
