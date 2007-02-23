@@ -208,18 +208,19 @@ sub DESTROY {}
 
 sub AUTOLOAD {
 	my $self = shift;
+	my $dbh = $self->dbh;
 	$AUTOLOAD =~ s/^.*:://;
 #	warn "${self}::$AUTOLOAD(".join(',',@_).")\n";
-	my @r;
 	RETRY:
-	eval { @r = ($self->dbh->$AUTOLOAD(@_)) };
-	if( $self->dbh->err ) {
-		if( $self->dbh->errstr =~ /MySQL server has gone away/ ) {
+	$dbh->{RaiseError} = 0;
+	my @r = $dbh->$AUTOLOAD(@_);
+	if( defined $dbh->err ) {
+		if( $dbh->errstr =~ /MySQL server has gone away/ ) {
 			if( $self->reconnect ) {
 				goto RETRY;
 			}
 		}
-		Carp::confess $self->dbh->errstr if $self->dbh->{RaiseError};
+		Carp::confess "Database error: " . $dbh->errstr;
 	}
 	return wantarray ? @r : $r[0];
 }
