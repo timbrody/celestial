@@ -794,7 +794,7 @@ sub svg_plot_series
 						height => $v,
 						fill => sprintf("#%02x00%02x",$r,$b),
 						stroke => '#000',
-						'stroke-width' => '.2',
+						'stroke-width' => ($scale_x > 1 ? '.2' : 0),
 						}), {
 					'xlink:href' => "$l",
 					target => "_top",
