@@ -36,6 +36,7 @@ function plotInit(evt)
 			rect.onmouseout = msOutBar;
 			rect.onmousemove = msMoveBar;
 			rect.origX = rect.getAttribute('x');
+			rect.origWidth = rect.getAttribute('width');
 		}
 	}
 }
@@ -154,7 +155,7 @@ function unfocusBar(bar)
 		var rect = a.firstChild;
 		while( rect.nodeName != 'rect' )
 			rect = rect.nextSibling;
-		rect.setAttribute('width', 1);
+		rect.setAttribute('width', rect.origWidth);
 		rect.setAttribute('x', rect.origX);
 		a = a.nextSibling;
 	}

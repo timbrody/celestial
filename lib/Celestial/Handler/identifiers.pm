@@ -790,7 +790,7 @@ sub svg_plot_series
 		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
 						x => $i,
 						y => $max-$v,
-						width => 1,
+						width => ($scale_x < 1 ? 1 / $scale_x : 1),
 						height => $v,
 						fill => sprintf("#%02x00%02x",$r,$b),
 						stroke => '#000',
