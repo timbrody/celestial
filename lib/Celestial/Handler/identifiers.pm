@@ -118,7 +118,7 @@ sub page
 			}
 		}
 
-		if( $from ) {
+		if( @{$DATA[0]} and $from ) {
 			for(my $i = $DATA[0]->[0]; $DATA[0]->[0] > $from; $i = $self->day_dec($i)) {
 				unshift @{$DATA[0]}, $i;
 				unshift @{$DATA[1]}, 0;
@@ -127,7 +127,7 @@ sub page
 				}
 			}
 		}
-		if( $until ) {
+		if( @{$DATA[0]} and $until ) {
 			for(my $i = $DATA[0]->[$#{$DATA[0]}]; $DATA[0]->[$#{$DATA[0]}] < $until; $i = $self->day_inc($i)) {
 				push @{$DATA[0]}, $i;
 				push @{$DATA[1]}, 0;
@@ -525,6 +525,8 @@ sub svg_log_y_axis
 {
 	my( $svg, $min, $max, $x, $y, $h ) = @_;
 
+	return 0 if $max-$min <= 0;
+
 	my $dy = log10(1+$max-$min);
 
 	my $scale_y = $h/$dy;
@@ -595,6 +597,8 @@ sub svg_x_axis
 	my( $svg, $pts, $x, $y, $w, $opts ) = @_;
 	$opts ||= {};
 
+	return 0 if @$pts == 0;
+
 	my $scale_x = $w / @$pts;
 
 	my @show = map { 1 } @$pts;
@@ -641,6 +645,8 @@ sub svg_log_y_plot_series
 {
 	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
+	return 0 if $max <= 0;
+	
 	$max = log10($max+1);
 
 	my $scale_x = $w/@$data;
@@ -677,6 +683,8 @@ sub svg_dna_plot_series
 {
 	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
+	return 0 if @$data == 0;
+
 	my $scale_x = $w/@$data;
 	my $scale_y = $h/$max;
 	
@@ -712,6 +720,8 @@ sub svg_plot_series
 {
 	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
+	return 0 if @$data == 0;
+
 	my $scale_x = $w/@$data;
 	my $scale_y = $h/$max;
 	
