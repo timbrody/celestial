@@ -50,6 +50,9 @@ sub page
 	my $set = $vars{set};
 	my $dna = $vars{dna};
 
+	$from =~ s/[^0-9]//sg;
+	$until =~ s/[^0-9]//sg;
+
 	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
 		or return $self->error( $CGI, "baseURL doesn't match any registered repository: $baseURL" );
 
@@ -147,8 +150,8 @@ sub page
 
 		$x += 15;
 		$y += 5;
-		$max_x -= 30;
-		$max_y -= 5;
+		$max_x -= 1;
+#		$max_y -= 5;
 
 		$svg->appendChild( dataElement( 'desc', 'Deposits per Day' ));
 #		$svg->appendChild( dataElement( 'rect', undef, {
@@ -167,15 +170,12 @@ sub page
 
 		$max_y -= 20;
 		if( $logy ) {
-			svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+			$x += svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
 		} else {
-			svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+			$x += svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
 		}
-		$x += 20;
 		$max_y += 20;
-		svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, {
-				skip_ticks => int(@{$DATA[0]}/10+.5),
-				});
+		svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, {} );
 		$max_y -= 20;
 
 		$ctx->appendChild( dataElement( 'rect', undef, {
@@ -527,6 +527,9 @@ sub svg_log_y_axis
 
 	return 0 if $max-$min <= 0;
 
+	my $w = length($max) * 3; # 5 pixels-ish per char
+	my $tick_width = 4;
+
 	my $dy = log10(1+$max-$min);
 
 	my $scale_y = $h/$dy;
@@ -541,30 +544,37 @@ sub svg_log_y_axis
 	my $step = int($dy/10);
 	for(my $i = 1; $i < $max; $i = $i."0" ) {
 		$ctx->appendChild( dataElement( 'rect', undef, {
-			x => 16,
+			x => $w - $tick_width,
 			y => ($dy-log10($i+1))*$scale_y,
-			width => 4,
+			width => $tick_width,
 			height => 1,
 			fill => 'black',
 		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
-			x => 14,
+			x => $w - $tick_width - 2,
 			y => ($dy-log10($i+1))*$scale_y+5,
 			#y => ($dy-$i)*$scale_y,
 			style => 'text-align:right;text-anchor:end;',
 		}));
 	}
 	
-	return 20;
+	return $w;
 }
 
 sub svg_y_axis
 {
 	my( $svg, $min, $max, $x, $y, $h ) = @_;
 
+	my $w = length($max) * 3; # 3 pixels-ish per char
+	my $tick_width = 4;
+
 	my $dy = $max-$min;
 
+	return 0 if $dy == 0;
+
 	my $scale_y = $h/$dy;
+
+	my $max_ticks = $h / 10 > 10 ? 10 : 5;
 
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
@@ -573,23 +583,24 @@ sub svg_y_axis
 		fill => 'black',
 	}));
 
-	my $step = int($dy/10);
+	my $step = int($dy/$max_ticks);
+	
 	for(my $i = 0; $i < $max; $i += $step ) {
 		$ctx->appendChild( dataElement( 'rect', undef, {
-			x => 16,
+			x => $w - $tick_width,
 			y => ($dy-$i)*$scale_y,
-			width => 4,
+			width => $tick_width,
 			height => 1,
 			fill => 'black',
 		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
-			x => 14,
+			x => $w - $tick_width - 2,
 			y => ($dy-$i)*$scale_y+5,
 			style => 'text-align:right;text-anchor:end;',
 		}));
 	}
 	
-	return 20;
+	return $w;
 }
 
 sub svg_x_axis
@@ -602,13 +613,15 @@ sub svg_x_axis
 	my $scale_x = $w / @$pts;
 
 	my @show = map { 1 } @$pts;
-	if( $opts->{skip_ticks} ) {
+	my $max_x_ticks = $w/80;
+	my $skip_ticks = int(@$pts/$max_x_ticks+.5);
+	if( $skip_ticks ) {
 		for(my $i = 0; $i < @show; $i++) {
-			unless($i % $opts->{skip_ticks} == 0) {
+			unless($i % $skip_ticks == 0) {
 				$show[$i] = 0;
 			}
 		}
-		for(my $i = $#show-$opts->{skip_ticks}; $i > 0 and $i < @show; $i++) {
+		for(my $i = $#show-$skip_ticks; $i > 0 and $i < @show; $i++) {
 			$show[$i] = 0;
 		}
 		$show[0] = 1;
@@ -622,7 +635,7 @@ sub svg_x_axis
 		fill => 'black',
 	}));
 
-	for(my $i = 0; $i < @$pts; $i++) {
+	for(my $i = 1; $i < $#$pts; $i++) {
 		next unless $show[$i];
 
 		$ctx->appendChild( dataElement( 'rect', undef, {
@@ -633,10 +646,46 @@ sub svg_x_axis
 		}));
 			
 		$ctx->appendChild( dataElement( 'text', $pts->[$i], {
-			x => $i*$scale_x,
+			x => $i*$scale_x+.5,
 			style => 'text-align:center;text-anchor:middle;',
 		}));
 	}
+
+	# Left-align the first point
+	$ctx->appendChild( dataElement( 'rect', undef, {
+		x => .5,
+		y => -20,
+		width => 1,
+		height => 5
+	}));
+	
+	if( $x > 25 )
+	{
+		$ctx->appendChild( dataElement( 'text', $pts->[$#$pts], {
+			x => .5,
+			style => 'text-align:center;text-anchor:middle;',
+		}));
+	}
+	else
+	{
+		$ctx->appendChild( dataElement( 'text', $pts->[$#$pts], {
+			x => $x * -1,
+			style => 'text-align:left;text-anchor:start;',
+		}));
+	}
+
+	# Right-align the last point
+	$ctx->appendChild( dataElement( 'rect', undef, {
+		x => $#$pts*$scale_x+.5,
+		y => -20,
+		width => 1,
+		height => 5
+	}));
+			
+	$ctx->appendChild( dataElement( 'text', $pts->[$#$pts], {
+		x => $w,
+		style => 'text-align:right;text-anchor:end;',
+	}));
 	
 	return 20;
 }
