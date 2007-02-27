@@ -135,7 +135,7 @@ sub _dspace
 			$jo->request->uri,
 			$jo->message,
 		);
-		return undef;
+		return ();
 	}
 	my $ct = $jo->content;
 	my $bu = $jo->request->uri;

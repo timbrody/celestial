@@ -107,7 +107,7 @@ sub synchronize($$) {
 	$dbh->do("DROP TEMPORARY TABLE IF EXISTS _orphans");
 	$dbh->do("CREATE TEMPORARY TABLE _orphans (`record` int unsigned not null, PRIMARY KEY(`record`))")
 		or die("Unable to create temp table for Fulltext synchronization: $!");
-	$dbh->do("INSERT INTO _orphans SELECT `record` FROM `$table` LEFT JOIN `$ref` ON `record`=`id` WHERE `id` is Null");
+	$dbh->do("INSERT INTO _orphans SELECT DISTINCT `record` FROM `$table` LEFT JOIN `$ref` ON `record`=`id` WHERE `id` is Null");
 	$dbh->do("DELETE FROM `$table` WHERE `record`=(SELECT O.`record` FROM _orphans AS O WHERE `$table`.`record`=O.`record`)");
 	$dbh->do("DROP TEMPORARY TABLE _orphans");
 }
