@@ -149,7 +149,7 @@ sub page
 		my $max_x = $w; my $max_y = $h;
 
 		$x += 15;
-		$y += 5;
+		$y += 1;
 		$max_x -= 1;
 #		$max_y -= 5;
 
@@ -184,7 +184,7 @@ sub page
 					width => $max_x-$x,
 					height => $max_y-$y,
 					stroke => '#000',
-					fill => 'none',
+					fill => '#ddd',
 					'stroke-width' => 1,
 					}));
 
@@ -661,14 +661,14 @@ sub svg_x_axis
 	
 	if( $x > 25 )
 	{
-		$ctx->appendChild( dataElement( 'text', $pts->[$#$pts], {
+		$ctx->appendChild( dataElement( 'text', $pts->[0], {
 			x => .5,
 			style => 'text-align:center;text-anchor:middle;',
 		}));
 	}
 	else
 	{
-		$ctx->appendChild( dataElement( 'text', $pts->[$#$pts], {
+		$ctx->appendChild( dataElement( 'text', $pts->[0], {
 			x => $x * -1,
 			style => 'text-align:left;text-anchor:start;',
 		}));
