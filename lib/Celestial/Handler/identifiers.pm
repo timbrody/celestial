@@ -791,7 +791,7 @@ sub svg_plot_series
 						x => $i*$scale_x,
 						y => ($max-$v)*$scale_y,
 						width => ($scale_x < 1 ? 1 : $scale_x),
-						height => $v,
+						height => $v*$scale_y,
 						fill => sprintf("#%02x00%02x",$r,$b),
 						stroke => '#000',
 						'stroke-width' => ($scale_x > 1 ? 1 : 0),
