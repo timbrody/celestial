@@ -35,8 +35,8 @@ function plotInit(evt)
 			rect.onmouseover = msOverBar;
 			rect.onmouseout = msOutBar;
 			rect.onmousemove = msMoveBar;
-			rect.origX = rect.getAttribute('x');
-			rect.origWidth = rect.getAttribute('width');
+			rect.origX = 1 * rect.getAttribute('x');
+			rect.origWidth = 1 * rect.getAttribute('width');
 		}
 	}
 }
@@ -74,7 +74,8 @@ function msMoveBar(evt)
 	var x = evt.clientX; // From page's origin
 	var y = evt.clientY;
 
-	var d = x < rect.mx ? -1 : (x > rect.mx ? 1 : 0);
+	// var d = x < rect.mx ? -1 : (x > rect.mx ? 1 : 0);
+	var d = x - rect.mx;
 	rect.flow += d;
 	rect.mx = x;
 	rect.my = y;
@@ -87,10 +88,13 @@ function focusBar(bar, dir)
 {
 	var a = bar.parentNode.previousSibling;
 
-	var flow = bar.flow / (300 / SIZE);
+	var scale = 20; // Pixels
 
-	var scale = SIZE / 50;
-	bar.setAttribute('width', 1 + scale);
+	// This is correct, but it is impractical?
+	//var flow = bar.flow * ((bar.origWidth + scale) / bar.origWidth);
+	var flow = bar.flow;
+
+	bar.setAttribute('width', bar.origWidth + scale);
 	bar.setAttribute('x', bar.origX - scale / 2 - flow);
 
 	var steps = 8;
@@ -111,7 +115,7 @@ function focusBar(bar, dir)
 			width = Math.sin(i * step) * scale;
 			dx += width;
 		}
-		rect.setAttribute('width', 1 + width);
+		rect.setAttribute('width', rect.origWidth + width);
 		rect.setAttribute('x', rect.origX - dx);
 		a = a.previousSibling;
 	}
@@ -133,7 +137,7 @@ function focusBar(bar, dir)
 			width = Math.sin(i * step) * scale;
 			dx += width;
 		}
-		rect.setAttribute('width', 1 + width);
+		rect.setAttribute('width', rect.origWidth + width);
 		rect.setAttribute('x', rect.origX - width + dx);
 		a = a.nextSibling;
 	}

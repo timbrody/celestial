@@ -702,7 +702,7 @@ sub svg_log_y_plot_series
 	my $scale_y = $h/$max;
 	
 	$svg->appendChild( my $plot = dataElement( 'g', undef, {
-		transform => "translate($x $y) scale($scale_x $scale_y)",
+		transform => "translate($x $y) scale(1 1)",
 		id => "plot",
 		_size => scalar @$data,
 	}));
@@ -716,11 +716,13 @@ sub svg_log_y_plot_series
 		my $r = int(255*$v/$max);
 		my $b = 255-int(255*$v/$max);
 		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
-						x => $i,
-						y => $max-$v,
-						width => 1,
-						height => $v,
+						x => $i*$scale_x,
+						y => ($max-$v)*$scale_y,
+						width => $scale_x < 1 ? 1 : $scale_x,
+						height => $v*$scale_y,
 						fill => sprintf("#%02x00%02x",$r,$b),
+						stroke => '#000',
+						'stroke-width' => ($scale_x > 1 ? 1 : 0),
 						}), {
 					'xlink:href' => "$l",
 					target => "_top",
