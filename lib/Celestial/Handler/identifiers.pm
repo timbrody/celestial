@@ -583,7 +583,7 @@ sub svg_y_axis
 		fill => 'black',
 	}));
 
-	my $step = int($dy/$max_ticks);
+	my $step = int($dy/$max_ticks) or return 0;
 	
 	for(my $i = 0; $i < $max; $i += $step ) {
 		$ctx->appendChild( dataElement( 'rect', undef, {
