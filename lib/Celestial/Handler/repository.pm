@@ -22,6 +22,10 @@ sub body {
 
 	my $repoid = $CGI->param( 'repository' );
 	return $self->error( $CGI, $CGI->msg( 'error.norepository' )) unless defined($repoid);
+	if( $repoid =~ /\D/ )
+	{
+		$repoid = $dbh->getRepositoryBaseURL($repoid);
+	}
 	my $repo = $dbh->getRepository( $repoid );
 	return $self->error( $CGI, $CGI->msg( 'error.nosuchrepository', $repoid )) unless defined($repo);
 

@@ -430,7 +430,7 @@ Get a repository id using its identifier.
 
 sub getRepositoryId($$) {
 	my ($self,$identifier) = @_;
-	my $sth = $self->prepare("SELECT id FROM Repositories WHERE `identifier`=?");
+	my $sth = $self->prepare("SELECT `id` FROM Repositories WHERE `identifier`=?");
 	$sth->execute($identifier);
 	my ($id) = $sth->fetchrow_array() or return undef;
 	$sth->finish;
