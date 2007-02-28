@@ -16,6 +16,7 @@ use CGI;
 use Text::Wrap;
 use XML::LibXML;
 use HTTP::OAI::Metadata::OAI_DC;
+use Time::Local;
 
 our $YMD = '%Y%m%d';
 
@@ -95,6 +96,7 @@ sub page
 	if( $format eq 'graph' )
 	{
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
+warn "Executing: $SQL (".join(',',@values).")\n";
 		my $sth = $dbh->prepare($SQL);
 		$sth->execute(@values)
 			or return $self->error( $CGI, $dbh->errstr);
@@ -807,19 +809,19 @@ sub svg_plot_series
 sub day_inc
 {
 	my( $self, $d ) = @_;
-	my $sth = $self->dbh->prepare("SELECT DATE_FORMAT(? + INTERVAL 1 DAY, '\%Y\%m\%d')");
-	$sth->execute($d) or die $self->dbh->errstr;;
-	($d) = $sth->fetchrow_array;
-	return $d;
+	my @t = gmtime(
+		timegm(0,0,0,substr($d,6,2),substr($d,4,2)-1,substr($d,0,4)-1900) +
+		86400); # 1 Day
+	return sprintf("%d%02d%02d", 1900+$t[5], 1+$t[4], $t[3]);
 }
 
 sub day_dec
 {
 	my( $self, $d ) = @_;
-	my $sth = $self->dbh->prepare("SELECT DATE_FORMAT(? - INTERVAL 1 DAY, '\%Y\%m\%d')");
-	$sth->execute($d) or die $self->dbh->errstr;;
-	($d) = $sth->fetchrow_array;
-	return $d;
+	my @t = gmtime(
+		timegm(0,0,0,substr($d,6,2),substr($d,4,2)-1,substr($d,0,4)-1900) -
+		86400); # 1 Day
+	return sprintf("%d%02d%02d", 1900+$t[5], 1+$t[4], $t[3]);
 }
 
 sub now
