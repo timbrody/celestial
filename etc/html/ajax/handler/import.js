@@ -35,7 +35,7 @@ function updatePage( response )
 	
 	var td = document.getElementById( url );
 	if( !td ) {
-		alert('Unable to locate entry: ' + url);
+		alert('Unable to locate entry: ' + url + ' [' + response + ']');
 		return;
 	}
 	

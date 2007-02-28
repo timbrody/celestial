@@ -237,7 +237,7 @@ sub _add_repository
 	}
 
 	return if defined($dbh->getRepositoryBaseURL( $url ));
-	my $repo = Celestial::Repository->new(
+	my $repo = Celestial::DBI::Repository->new(
 		dbh=>$dbh,
 		id => undef,
 		identifier => $name,
