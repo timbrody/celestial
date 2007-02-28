@@ -7,7 +7,7 @@ use Celestial::Config; # Exports $SETTINGS
 
 use YAML;
 use vars qw( $AUTOLOAD );
-use Apache::Const qw( REDIRECT NOT_FOUND );
+use Apache::Const qw( REDIRECT NOT_FOUND SERVER_ERROR );
 use URI;
 use URI::Escape qw();
 use Number::Bytes::Human qw();
@@ -119,13 +119,17 @@ sub redirect {
 	my $self = shift;
 	my $r = $self->request;
 	$r->err_headers_out->add( 'Location' => shift );
-	$self->status( REDIRECT );
+	$r->status( REDIRECT );
 }
 
 sub not_found {
 	my $self = shift;
-	my $r = $self->request;
-	$self->status( NOT_FOUND );
+	$self->request->status( NOT_FOUND );
+}
+
+sub internal_error {
+	my $self = shift;
+	$self->request->status( SERVER_ERROR );
 }
 
 sub content_type {

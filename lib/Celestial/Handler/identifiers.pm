@@ -841,6 +841,7 @@ sub error
 {
 	my( $self, $CGI, $err ) = @_;
 
+	$CGI->internal_error();
 	$CGI->content_type( 'text/plain' );
 
 	print $err;
