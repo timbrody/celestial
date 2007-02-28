@@ -96,7 +96,6 @@ sub page
 	if( $format eq 'graph' )
 	{
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
-warn "Executing: $SQL (".join(',',@values).")\n";
 		my $sth = $dbh->prepare($SQL);
 		$sth->execute(@values)
 			or return $self->error( $CGI, $dbh->errstr);
@@ -724,7 +723,7 @@ sub svg_log_y_plot_series
 						height => $v*$scale_y,
 						fill => sprintf("#%02x00%02x",$r,$b),
 						stroke => '#000',
-						'stroke-width' => ($scale_x > 1 ? 1 : 0),
+						'stroke-width' => ($scale_x > 2 ? 1 : 0),
 						}), {
 					'xlink:href' => "$l",
 					target => "_top",
@@ -798,7 +797,7 @@ sub svg_plot_series
 						height => $v*$scale_y,
 						fill => sprintf("#%02x00%02x",$r,$b),
 						stroke => '#000',
-						'stroke-width' => ($scale_x > 1 ? 1 : 0),
+						'stroke-width' => ($scale_x > 2 ? 1 : 0),
 						}), {
 					'xlink:href' => "$l",
 					target => "_top",
