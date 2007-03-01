@@ -1,0 +1,148 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+B<roar_update> - update ROAR record counts from Celestial
+
+=head1 SYNOPSIS
+
+B<roar_update> [B<options>]
+
+=head1 DESCRIPTION
+
+This script updates ROAR's record counts using the Celestial database.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>
+
+Show this page.
+
+=item B<--list>
+
+List all configured repositories.
+
+=item B<--repository>
+
+Harvest only the repository given (use B<--list> to get a list of identifiers).
+
+=item B<--verbose>
+
+Be more verbose.
+
+=back
+
+=cut
+
+use Carp;
+
+use strict;
+use warnings;
+use encoding 'utf8';
+
+binmode(STDOUT,":utf8");
+
+use POSIX qw/:sys_wait_h strftime/;
+
+use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $JAVA $DROID $DROID_SIG $MAX_FILE_SIZE);
+
+$VERSION = '3.02';
+
+use Getopt::Long;
+use Pod::Usage;
+
+use Celestial::DBI;
+use Date::Parse;
+use File::Temp;
+
+our $opt_verbose;
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun );
+$opt_dryrun = 0;
+$opt_verbose = 0;
+$opt_fork = 1;
+$opt_fulltext = 1;
+
+GetOptions(
+	'verbose+' => \$opt_verbose,
+	'list' => \$opt_list,
+	'repository=s' => \$opt_repository,
+	'help' => \$opt_help,
+	'cfg=s' => \$opt_cfg,
+) or pod2usage("Invalid argument");
+
+pod2usage(1) if $opt_help;
+
+if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
+	pod2usage("Repository argument must be numeric.");
+}
+
+$DEBUG = $opt_verbose;
+
+my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
+
+if( $opt_list ) {
+	my @repos = $dbh->listRepositories();
+
+	print "id\tidentifier\n";
+	for (sort { $a->id <=> $b->id } @repos) {
+		printf("%d\t%s\t%s\n", $_->id, $_->identifier, $_->baseURL);
+	}
+	exit(0);
+}
+
+my $iar_dbh = DBI->connect("dbi:mysql:host=leo;port=3316;database=iar","iar","")
+	or die "Unable to connect to ROAR database: $!";
+
+my @repos;
+
+if( defined($opt_repository) )
+{
+	my $repo = $dbh->getRepository($opt_repository)
+		or die "No such repository [$opt_repository]\n";
+	push @repos, $repo;
+}
+else
+{
+	@repos = $dbh->listRepositories();
+}
+
+foreach my $repo (@repos)
+{
+	my $baseURL = $repo->baseURL;
+
+	my $isth = $iar_dbh->prepare("SELECT `id` FROM `live` WHERE `field`='oai' AND `value`=? LIMIT 1");
+	$isth->execute($baseURL) or die $!;
+	my( $id ) = $isth->fetchrow_array or next;
+	
+	my $mdf = $repo->getMetadataFormat('oai_dc')
+		or next;
+	my $table = $mdf->table;
+
+	print "Processing [$baseURL]\n" if $opt_verbose;
+	my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS d,COUNT(*) FROM `$table` WHERE `accession` BETWEEN NOW() - INTERVAL 1 YEAR AND NOW() GROUP BY d";
+	my $sth = $dbh->prepare($SQL);
+	$sth->execute() or die $!;
+
+	my( $low, $medium, $high ) = (0,0,0);
+	while(my( $d, $c ) = $sth->fetchrow_array)
+	{
+		$low++ if $c > 0;
+		$medium++ if $c >= 10;
+		$high++ if $c >= 100;
+	}
+
+	$SQL = "SELECT COUNT(*) FROM `$table`";
+	$sth = $dbh->prepare($SQL);
+	$sth->execute() or die $!;
+	my( $total ) = $sth->fetchrow_array;
+
+	$iar_dbh->do("LOCK TABLES `live` WRITE");
+	$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND (`field`='activity_low' OR `field`='activity_medium' OR `field`='activity_high' OR `field`='recordcount')");
+	$iar_dbh->do("INSERT INTO `live` (`id`,`field`,`value`) VALUES ($id,'activity_low',$low), ($id,'activity_medium',$medium), ($id,'activity_high',$high), ($id,'recordcount',$total)");
+	$iar_dbh->do("UNLOCK TABLES");
+}
+
+$dbh->disconnect;
+$iar_dbh->disconnect;
