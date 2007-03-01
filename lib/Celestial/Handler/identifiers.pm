@@ -49,7 +49,6 @@ sub page
 	$width = 800 if !$width or $width =~ /\D/;
 	$height = 300 if !$height or $height =~ /\D/;
 	my $set = $vars{set};
-	my $dna = $vars{dna};
 
 	$from =~ s/[^0-9]//sg;
 	$until =~ s/[^0-9]//sg;
@@ -194,8 +193,6 @@ sub page
 
 		if( $logy ) {
 			svg_log_y_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
-		} elsif( $dna ) {
-			svg_dna_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
 		} else {
 			svg_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
 		}
@@ -724,43 +721,6 @@ sub svg_log_y_plot_series
 						fill => sprintf("#%02x00%02x",$r,$b),
 						stroke => '#000',
 						'stroke-width' => ($scale_x > 2 ? 1 : 0),
-						}), {
-					'xlink:href' => "$l",
-					target => "_top",
-					}));
-	}
-}
-
-sub svg_dna_plot_series
-{
-	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
-	
-	return 0 if @$data == 0;
-
-	my $scale_x = $w/@$data;
-	my $scale_y = $h/$max;
-	
-	$svg->appendChild( my $plot = dataElement( 'g', undef, {
-		transform => "translate($x $y) scale($scale_x $scale_y)",
-		id => "plot",
-		_size => scalar @$data,
-	}));
-	for(my $i = 0; $i < @$data; $i++)
-	{
-		my $v = $data->[$i] or next;
-		my %qry = $l->query_form;
-		$qry{dataset} = $labels->[$i];
-		$l->query_form(%qry);
-		my $r = int(255*$v/$max);
-		my $b = 255-int(255*$v/$max);
-		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
-						x => $i,
-						y => $max-$v,
-						width => 1,
-						height => $v,
-						fill => sprintf("#%02x00%02x",$r,$b),
-						stroke => '#000',
-						'stroke-width' => '.2',
 						}), {
 					'xlink:href' => "$l",
 					target => "_top",
