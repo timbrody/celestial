@@ -820,12 +820,12 @@ sub svg_log_y_plot_series
 	for(my $i = 0; $i < @$data; $i++)
 	{
 		my $v = $data->[$i] or next;
-		$v = log10($v+1);
 		my %qry = $l->query_form;
 		$qry{dataset} = $labels->[$i];
 		$l->query_form(%qry);
-		my $r = int(255*10**$v/$color_max);
-		my $b = 255-int(255*10**$v/$color_max);
+		my $r = int(255*$v/$color_max);
+		my $b = 255-int(255*$v/$color_max);
+		$v = log10($v+1);
 		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
 						x => $i*$scale_x,
 						y => ($max-$v)*$scale_y,
