@@ -135,6 +135,11 @@ sub page
 
 	if( $format eq 'graph' )
 	{
+		$self->{colors} = {
+			y_axis => '#000',
+			x_axis => '#000',
+		};
+		
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
 #return $self->error($CGI, "Executing: ".join(',',@values,$SQL));
 		my $sth = $dbh->prepare($SQL);
@@ -237,20 +242,21 @@ sub page
 		
 		$max_y -= 15;
 		if( $cumu ) {
+			$self->{colors}->{y_axis} = '#080';
 			if( $logy_cumu ) {
-				$x += svg_log_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
+				$x += $self->svg_log_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
 			} else {
-				$x += svg_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
+				$x += $self->svg_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
 			}
 		} else {
 			if( $logy ) {
-				$x += svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+				$x += $self->svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
 			} else {
-				$x += svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+				$x += $self->svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
 			}
 		}
 		$max_y += 15;
-		svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
+		$self->svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
 		$max_y -= 15;
 
 		$ctx->appendChild( dataElement( 'rect', undef, {
@@ -268,17 +274,17 @@ sub page
 
 		my $f = $logy ? \&svg_log_y_plot_series : \&svg_plot_series;
 		if( $cumu ) {
-			&$f( $ctx, $l, @DATA[0,1], $max * ($logy ? 4 : 1.5), $x, $y, $max_x-$x, $max_y-$y );
+			&$f( $self, $ctx, $l, @DATA[0,1], $max * ($logy ? 4 : 1.5), $x, $y, $max_x-$x, $max_y-$y );
 		} else {
-			&$f( $ctx, $l, @DATA[0,1], $max, $x, $y, $max_x-$x, $max_y-$y );
+			&$f( $self, $ctx, $l, @DATA[0,1], $max, $x, $y, $max_x-$x, $max_y-$y );
 		}
 		if( $cumu ) {
 			my $f = $logy_cumu ? \&svg_log_y_plot_line : \&svg_plot_line;
-			&$f( $ctx, $l, @DATA[0,2], $sum, $x, $y, $max_x-$x, $max_y-$y, 1 );
+			&$f( $self, $ctx, $l, @DATA[0,2], $sum, $x, $y, $max_x-$x, $max_y-$y, 1 );
 		}
 		if( $cumu ) {
 			my $f = $logy_cumu ? \&svg_log_y_plot_line : \&svg_plot_line;
-			&$f( $ctx, $l, @DATA[0,2], $sum, $x, $y, $max_x-$x, $max_y-$y, 0 );
+			&$f( $self, $ctx, $l, @DATA[0,2], $sum, $x, $y, $max_x-$x, $max_y-$y, 0 );
 		}
 
 		binmode(STDOUT, ":utf8");
@@ -605,7 +611,7 @@ sub svg
 
 sub svg_log_y_axis
 {
-	my( $svg, $min, $max, $x, $y, $h ) = @_;
+	my( $self, $svg, $min, $max, $x, $y, $h ) = @_;
 
 	return 0 if $max-$min <= 0;
 
@@ -630,13 +636,14 @@ sub svg_log_y_axis
 			y => ($dy-log10($i+1))*$scale_y,
 			width => $tick_width,
 			height => 1,
-			fill => 'black',
+			fill => $self->{colors}->{y_axis},
 		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
 			x => $w - $tick_width - 2,
 			y => ($dy-log10($i+1))*$scale_y+5,
 			#y => ($dy-$i)*$scale_y,
 			style => 'text-align:right;text-anchor:end;',
+			fill => $self->{colors}->{y_axis},
 		}));
 	}
 	
@@ -645,7 +652,7 @@ sub svg_log_y_axis
 
 sub svg_y_axis
 {
-	my( $svg, $min, $max, $x, $y, $h ) = @_;
+	my( $self, $svg, $min, $max, $x, $y, $h ) = @_;
 
 	my $w = length("$max") * 6; # 5 pixels-ish per char
 	my $tick_width = 4;
@@ -664,11 +671,13 @@ sub svg_y_axis
 
 	my $divisor = y_axis_divisor($dy, $min_ticks, $max_ticks);
 
+	my $color = $self->{colors}->{y_axis};
+
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
 		'font-family' => 'sans-serif',
 		'font-size' => '10pt',
-		fill => 'black',
+		fill => $color,
 	}));
 
 	my $step = int($dy/$divisor) || 1;
@@ -680,12 +689,13 @@ sub svg_y_axis
 			y => ($dy-$i)*$scale_y,
 			width => $tick_width,
 			height => 1,
-			fill => 'black',
+			fill => $color,
 		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
 			x => $w - $tick_width - 2,
 			y => ($dy-$i)*$scale_y+5,
 			style => 'text-align:right;text-anchor:end;',
+			fill => $color,
 		}));
 	}
 	$ctx->appendChild( dataElement( 'rect', undef, {
@@ -693,12 +703,13 @@ sub svg_y_axis
 		y => ($dy-$i)*$scale_y,
 		width => $tick_width,
 		height => 1,
-		fill => 'black',
+		fill => $color,
 	}));
 	$ctx->appendChild( dataElement( 'text', $i, {
 		x => $w - $tick_width - 2,
 		y => ($dy-$i)*$scale_y+10,
 		style => 'text-align:right;text-anchor:end;',
+		fill => $color,
 	}));
 	
 	return $w;
@@ -706,7 +717,7 @@ sub svg_y_axis
 
 sub svg_x_axis
 {
-	my( $svg, $pts, $x, $y, $w, $h, $opts ) = @_;
+	my( $self, $svg, $pts, $x, $y, $w, $h, $opts ) = @_;
 	$opts ||= {};
 
 	return 0 if @$pts == 0;
@@ -793,7 +804,7 @@ sub svg_x_axis
 
 sub svg_log_y_plot_series
 {
-	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
+	my( $self, $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
 	return 0 if $max <= 0;
 	
@@ -838,7 +849,7 @@ sub svg_log_y_plot_series
 
 sub svg_log_y_plot_line
 {
-	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h, $filled ) = @_;
+	my( $self, $svg, $l, $labels, $data, $max, $x, $y, $w, $h, $filled ) = @_;
 	
 	return 0 if $max <= 0;
 	
@@ -864,7 +875,8 @@ sub svg_log_y_plot_line
 		$plot->appendChild( dataElement( 'polyline', undef, {
 				points => join(' ', @points),
 				stroke => 'none',
-				fill => '#4f4',
+				fill => '#fff',
+				opacity => '.5',
 			}));
 	}
 	else
@@ -874,14 +886,13 @@ sub svg_log_y_plot_line
 				stroke => '#080',
 				fill => 'none',
 				'stroke-width' => ($h / 100 > 2 ? $h / 100 : 2),
-				opacity => '.75',
 			}));
 	}
 }
 
 sub svg_plot_series
 {
-	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
+	my( $self, $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
 	return 0 if @$data == 0;
 
@@ -923,7 +934,7 @@ sub svg_plot_series
 
 sub svg_plot_line
 {
-	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h, $filled ) = @_;
+	my( $self, $svg, $l, $labels, $data, $max, $x, $y, $w, $h, $filled ) = @_;
 	
 	return 0 if @$data == 0;
 
@@ -958,7 +969,6 @@ sub svg_plot_line
 				stroke => '#080',
 				fill => 'none',
 				'stroke-width' => ($h / 100 > 2 ? $h / 100 : 2),
-				opacity => '.75',
 			}));
 	}
 }
