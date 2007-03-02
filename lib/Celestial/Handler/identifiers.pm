@@ -675,9 +675,8 @@ sub svg_y_axis
 
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
-		'font-family' => 'sans-serif',
-		'font-size' => '10pt',
 		fill => $color,
+		style => 'fony-family: sans-serif; font-size: 12px;',
 	}));
 
 	my $step = int($dy/$divisor) || 1;
@@ -689,13 +688,11 @@ sub svg_y_axis
 			y => ($dy-$i)*$scale_y,
 			width => $tick_width,
 			height => 1,
-			fill => $color,
 		}));
 		$ctx->appendChild( dataElement( 'text', $i, {
 			x => $w - $tick_width - 2,
 			y => ($dy-$i)*$scale_y+5,
 			style => 'text-align:right;text-anchor:end;',
-			fill => $color,
 		}));
 	}
 	$ctx->appendChild( dataElement( 'rect', undef, {
@@ -703,13 +700,11 @@ sub svg_y_axis
 		y => ($dy-$i)*$scale_y,
 		width => $tick_width,
 		height => 1,
-		fill => $color,
 	}));
 	$ctx->appendChild( dataElement( 'text', $i, {
 		x => $w - $tick_width - 2,
 		y => ($dy-$i)*$scale_y+10,
 		style => 'text-align:right;text-anchor:end;',
-		fill => $color,
 	}));
 	
 	return $w;
@@ -742,9 +737,8 @@ sub svg_x_axis
 
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
-		'font-family' => 'sans-serif',
-		'font-size' => '9pt',
-		fill => 'black',
+		fill => $self->{colors}->{x_axis},
+		style => 'font-family: sans-serif; font-size: 12px',
 	}));
 
 	for(my $i = 1; $i < $#$pts; $i++) {
