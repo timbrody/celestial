@@ -36,7 +36,10 @@ sub page
 	$url =~ s/;/&/g;
 	my %vars = URI->new($url)->query_form;
 
+	my $cumu = $vars{cumu};
 	my $logy = defined($vars{logy}) ? $vars{logy} : 1;
+	my $logy_cumu = defined($vars{logy_cumu}) ? $vars{logy_cumu} : 1;
+	my $scale_max = $vars{scale_max} || 'auto';
 	my $from = $vars{from};
 	my $until = $vars{until};
 	$from ||= $self->now(" - INTERVAL 1 YEAR");
@@ -49,6 +52,32 @@ sub page
 	$width = 800 if !$width or $width =~ /\D/;
 	$height = 300 if !$height or $height =~ /\D/;
 	my $set = $vars{set};
+	my $granularity = $vars{granularity} || '';
+	my( $date_format, $inc_method, $dec_method );
+	if( $granularity eq 'yearly' )
+	{
+		$date_format = '%Y';
+		$inc_method = \&year_inc;
+		$dec_method = \&year_dec;
+		$from = substr($from,0,4) if $from;
+		$until = substr($until,0,4) if $until;
+	}
+	elsif( $granularity eq 'monthly' )
+	{
+		$date_format = '%Y%m';
+		$inc_method = \&month_inc;
+		$dec_method = \&month_dec;
+		$from = substr($from,0,6) if $from;
+		$until = substr($until,0,6) if $until;
+	}
+	else
+	{
+		$date_format = '%Y%m%d';
+		$inc_method = \&day_inc;
+		$dec_method = \&day_dec;
+		$from = substr($from,0,8) if $from;
+		$until = substr($until,0,8) if $until;
+	}
 
 	$from =~ s/[^0-9]//sg;
 	$until =~ s/[^0-9]//sg;
@@ -75,7 +104,19 @@ sub page
 	my @values;
 	if( $from and $until ) {
 		push @logic, "`accession` BETWEEN ? AND ?";
-		push @values, $from, $until;
+		# Annoyingly MySQL will accept YYYYMM but not YYYY?
+		if( $granularity eq 'yearly' )
+		{
+			push @values, $from . '0101', $until . '1231';
+		}
+		elsif( $granularity eq 'monthly' )
+		{
+			push @values, $from . '01', $until . '31';
+		}
+		else
+		{
+			push @values, $from, $until;
+		}
 	} elsif( $from ) {
 		push @logic, "`accession` >= ?";
 		push @values, $from;
@@ -94,49 +135,67 @@ sub page
 
 	if( $format eq 'graph' )
 	{
-		my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
+		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
+#return $self->error($CGI, "Executing: ".join(',',@values,$SQL));
 		my $sth = $dbh->prepare($SQL);
 		$sth->execute(@values)
 			or return $self->error( $CGI, $dbh->errstr);
 
-		my @DATA = ([],[]);
+		my @DATA = ([],[],[]);
 		my $max = 0;
+		my $sum = 0;
 		while(my($day,$c) = $sth->fetchrow_array)
 		{
 			push @{$DATA[0]}, $day;
 			push @{$DATA[1]}, $c;
+			push @{$DATA[2]}, $sum += $c;
 			$max = $c if $c > $max;
 		}
 		for(my $i = 0; $i < $#{$DATA[0]}; $i++)
 		{
-			my $n = $self->day_inc($DATA[0]->[$i]);
+			my $n = &$inc_method($self,$DATA[0]->[$i]);
 			while($n < $DATA[0]->[$i+1]) {
 				splice(@{$DATA[0]}, $i+1, 0, $n);
 				splice(@{$DATA[1]}, $i+1, 0, 0);
-				$n = $self->day_inc($n);
+				splice(@{$DATA[2]}, $i+1, 0, $DATA[2]->[$i]);
+				$n = &$inc_method($self,$n);
 				if( @{$DATA[0]} > 10000 ) {
-					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points [gaps]\n");
 				}
 
 			}
 		}
 
 		if( @{$DATA[0]} and $from ) {
-			for(my $i = $DATA[0]->[0]; $DATA[0]->[0] > $from; $i = $self->day_dec($i)) {
+			for(my $i = $DATA[0]->[0]; $DATA[0]->[0] > $from; $i = &$dec_method($self,$i)) {
 				unshift @{$DATA[0]}, $i;
 				unshift @{$DATA[1]}, 0;
+				unshift @{$DATA[2]}, 0;
 				if( @{$DATA[0]} > 10000 ) {
-					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points [from: $DATA[0]->[0] > $from = $i]\n");
 				}
 			}
 		}
 		if( @{$DATA[0]} and $until ) {
-			for(my $i = $DATA[0]->[$#{$DATA[0]}]; $DATA[0]->[$#{$DATA[0]}] < $until; $i = $self->day_inc($i)) {
+			for(my $i = $DATA[0]->[$#{$DATA[0]}]; $DATA[0]->[$#{$DATA[0]}] < $until; $i = &$inc_method($self,$i)) {
 				push @{$DATA[0]}, $i;
 				push @{$DATA[1]}, 0;
+				push @{$DATA[2]}, $DATA[2]->[$#{$DATA[2]}];
 				if( @{$DATA[0]} > 10000 ) {
-					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points\n");
+					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points [until: ".$DATA[0]->[$#{$DATA[0]}]." < $until = $i]\n");
 				}
+			}
+		}
+
+		if( $granularity eq 'yearly' ) {
+		} elsif( $granularity eq 'monthly' ) {
+			for(@{$DATA[0]}) {
+				substr($_,4,0) = '-';
+			}
+		} else {
+			for(@{$DATA[0]}) {
+				substr($_,4,0) = '-';
+				substr($_,7,0) = '-';
 			}
 		}
 
@@ -168,15 +227,31 @@ sub page
 #		transform => "translate($w $h) rotate(180)"
 					}));
 
-		$max_y -= 20;
-		if( $logy ) {
-			$x += svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+		if( $scale_max eq 'log' ) {
+			$sum = y_axis_max($sum, 1);
+			$max = y_axis_max($max, 1);
 		} else {
-			$x += svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+			$sum = y_axis_max($sum, $logy_cumu);
+			$max = y_axis_max($max, $logy);
 		}
-		$max_y += 20;
-		svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, {} );
-		$max_y -= 20;
+		
+		$max_y -= 15;
+		if( $cumu ) {
+			if( $logy_cumu ) {
+				$x += svg_log_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
+			} else {
+				$x += svg_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
+			}
+		} else {
+			if( $logy ) {
+				$x += svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+			} else {
+				$x += svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+			}
+		}
+		$max_y += 15;
+		svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
+		$max_y -= 15;
 
 		$ctx->appendChild( dataElement( 'rect', undef, {
 					x => $x,
@@ -191,10 +266,19 @@ sub page
 		my $l = URI->new('', 'http');
 		$l->query_form(%{{%vars, format => ''}});
 
-		if( $logy ) {
-			svg_log_y_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
+		my $f = $logy ? \&svg_log_y_plot_series : \&svg_plot_series;
+		if( $cumu ) {
+			&$f( $ctx, $l, @DATA[0,1], $max * ($logy ? 4 : 1.5), $x, $y, $max_x-$x, $max_y-$y );
 		} else {
-			svg_plot_series( $ctx, $l, @DATA, $max, $x, $y, $max_x-$x, $max_y-$y );
+			&$f( $ctx, $l, @DATA[0,1], $max, $x, $y, $max_x-$x, $max_y-$y );
+		}
+		if( $cumu ) {
+			my $f = $logy_cumu ? \&svg_log_y_plot_line : \&svg_plot_line;
+			&$f( $ctx, $l, @DATA[0,2], $sum, $x, $y, $max_x-$x, $max_y-$y, 1 );
+		}
+		if( $cumu ) {
+			my $f = $logy_cumu ? \&svg_log_y_plot_line : \&svg_plot_line;
+			&$f( $ctx, $l, @DATA[0,2], $sum, $x, $y, $max_x-$x, $max_y-$y, 0 );
 		}
 
 		binmode(STDOUT, ":utf8");
@@ -525,7 +609,7 @@ sub svg_log_y_axis
 
 	return 0 if $max-$min <= 0;
 
-	my $w = length($max) * 3; # 5 pixels-ish per char
+	my $w = length("$max") * 6; # 5 pixels-ish per char
 	my $tick_width = 4;
 
 	my $dy = log10(1+$max-$min);
@@ -563,7 +647,7 @@ sub svg_y_axis
 {
 	my( $svg, $min, $max, $x, $y, $h ) = @_;
 
-	my $w = length($max) * 3; # 3 pixels-ish per char
+	my $w = length("$max") * 6; # 5 pixels-ish per char
 	my $tick_width = 4;
 
 	my $dy = $max-$min;
@@ -572,7 +656,13 @@ sub svg_y_axis
 
 	my $scale_y = $h/$dy;
 
-	my $max_ticks = $h / 10 > 10 ? 10 : 5;
+	# At least 15 pixels between ticks
+	my $max_ticks = $h / 15 > 20 ? 20 : int($h / 15);
+	$max_ticks = 2 if $max_ticks < 2;
+	my $min_ticks = int($max_ticks/2);
+	$min_ticks = 2 if $min_ticks < 2;
+
+	my $divisor = y_axis_divisor($dy, $min_ticks, $max_ticks);
 
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
@@ -581,9 +671,10 @@ sub svg_y_axis
 		fill => 'black',
 	}));
 
-	my $step = int($dy/$max_ticks) || 1;
+	my $step = int($dy/$divisor) || 1;
 	
-	for(my $i = 0; $i < $max; $i += $step ) {
+	my $i;
+	for($i = 0; $i < $max; $i += $step ) {
 		$ctx->appendChild( dataElement( 'rect', undef, {
 			x => $w - $tick_width,
 			y => ($dy-$i)*$scale_y,
@@ -597,13 +688,25 @@ sub svg_y_axis
 			style => 'text-align:right;text-anchor:end;',
 		}));
 	}
+	$ctx->appendChild( dataElement( 'rect', undef, {
+		x => $w - $tick_width,
+		y => ($dy-$i)*$scale_y,
+		width => $tick_width,
+		height => 1,
+		fill => 'black',
+	}));
+	$ctx->appendChild( dataElement( 'text', $i, {
+		x => $w - $tick_width - 2,
+		y => ($dy-$i)*$scale_y+10,
+		style => 'text-align:right;text-anchor:end;',
+	}));
 	
 	return $w;
 }
 
 sub svg_x_axis
 {
-	my( $svg, $pts, $x, $y, $w, $opts ) = @_;
+	my( $svg, $pts, $x, $y, $w, $h, $opts ) = @_;
 	$opts ||= {};
 
 	return 0 if @$pts == 0;
@@ -637,22 +740,22 @@ sub svg_x_axis
 		next unless $show[$i];
 
 		$ctx->appendChild( dataElement( 'rect', undef, {
-			x => $i*$scale_x+.5,
-			y => -20,
+			x => $i*$scale_x+.5*$scale_x,
+			y => -1*$h,
 			width => 1,
 			height => 5
 		}));
 			
 		$ctx->appendChild( dataElement( 'text', $pts->[$i], {
-			x => $i*$scale_x+.5,
+			x => $i*$scale_x+.5*$scale_x,
 			style => 'text-align:center;text-anchor:middle;',
 		}));
 	}
 
 	# Left-align the first point
 	$ctx->appendChild( dataElement( 'rect', undef, {
-		x => .5,
-		y => -20,
+		x => .5*$scale_x,
+		y => -1*$h,
 		width => 1,
 		height => 5
 	}));
@@ -660,7 +763,7 @@ sub svg_x_axis
 	if( $x > 25 )
 	{
 		$ctx->appendChild( dataElement( 'text', $pts->[0], {
-			x => .5,
+			x => .5*$scale_x,
 			style => 'text-align:center;text-anchor:middle;',
 		}));
 	}
@@ -674,8 +777,8 @@ sub svg_x_axis
 
 	# Right-align the last point
 	$ctx->appendChild( dataElement( 'rect', undef, {
-		x => $#$pts*$scale_x+.5,
-		y => -20,
+		x => $#$pts*$scale_x+.5*$scale_x,
+		y => -1*$h,
 		width => 1,
 		height => 5
 	}));
@@ -685,7 +788,7 @@ sub svg_x_axis
 		style => 'text-align:right;text-anchor:end;',
 	}));
 	
-	return 20;
+	return $h;
 }
 
 sub svg_log_y_plot_series
@@ -699,6 +802,11 @@ sub svg_log_y_plot_series
 	my $scale_x = $w/@$data;
 	my $scale_y = $h/$max;
 	
+	my $color_max = 1;
+	for(@$data) {
+		$color_max = $_ if $_ > $color_max;
+	}
+	
 	$svg->appendChild( my $plot = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
 		id => "plot",
@@ -711,8 +819,8 @@ sub svg_log_y_plot_series
 		my %qry = $l->query_form;
 		$qry{dataset} = $labels->[$i];
 		$l->query_form(%qry);
-		my $r = int(255*$v/$max);
-		my $b = 255-int(255*$v/$max);
+		my $r = int(255*10**$v/$color_max);
+		my $b = 255-int(255*10**$v/$color_max);
 		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
 						x => $i*$scale_x,
 						y => ($max-$v)*$scale_y,
@@ -728,6 +836,49 @@ sub svg_log_y_plot_series
 	}
 }
 
+sub svg_log_y_plot_line
+{
+	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h, $filled ) = @_;
+	
+	return 0 if $max <= 0;
+	
+	$max = log10($max+1);
+
+	my $scale_x = $w/@$data;
+	my $scale_y = $h/$max;
+	
+	$svg->appendChild( my $plot = dataElement( 'g', undef, {
+		transform => "translate($x $y) scale(1 1)",
+		id => "plot",
+	}));
+	my @points;
+	for(my $i = 0; $i < @$data; $i++)
+	{
+		my $v = log10($data->[$i]+1);
+		push @points, sprintf("%f,%f", ($i+.5)*$scale_x, ($max-$v)*$scale_y);
+	}
+	if( $filled )
+	{
+		push @points, sprintf("%f,%f", ($#$data+.5)*$scale_x, $max*$scale_y);
+		push @points, sprintf("%f,%f", .5*$scale_x, $max*$scale_y);
+		$plot->appendChild( dataElement( 'polyline', undef, {
+				points => join(' ', @points),
+				stroke => 'none',
+				fill => '#4f4',
+			}));
+	}
+	else
+	{
+		$plot->appendChild( dataElement( 'polyline', undef, {
+				points => join(' ', @points),
+				stroke => '#080',
+				fill => 'none',
+				'stroke-width' => ($h / 100 > 2 ? $h / 100 : 2),
+				opacity => '.75',
+			}));
+	}
+}
+
 sub svg_plot_series
 {
 	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
@@ -736,6 +887,11 @@ sub svg_plot_series
 
 	my $scale_x = $w/@$data;
 	my $scale_y = $h/$max;
+	
+	my $color_max = 1;
+	for(@$data) {
+		$color_max = $_ if $_ > $color_max;
+	}
 	
 	$svg->appendChild( my $plot = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
@@ -748,8 +904,8 @@ sub svg_plot_series
 		my %qry = $l->query_form;
 		$qry{dataset} = $labels->[$i];
 		$l->query_form(%qry);
-		my $r = int(255*$v/$max);
-		my $b = 255-int(255*$v/$max);
+		my $r = int(255*$v/$color_max);
+		my $b = 255-int(255*$v/$color_max);
 		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
 						x => $i*$scale_x,
 						y => ($max-$v)*$scale_y,
@@ -762,6 +918,48 @@ sub svg_plot_series
 					'xlink:href' => "$l",
 					target => "_top",
 					}));
+	}
+}
+
+sub svg_plot_line
+{
+	my( $svg, $l, $labels, $data, $max, $x, $y, $w, $h, $filled ) = @_;
+	
+	return 0 if @$data == 0;
+
+	my $scale_x = $w/@$data;
+	my $scale_y = $h/$max;
+	
+	$svg->appendChild( my $plot = dataElement( 'g', undef, {
+		transform => "translate($x $y) scale(1 1)",
+		id => "plot",
+	}));
+	my @points;
+	for(my $i = 0; $i < @$data; $i++)
+	{
+		my $v = $data->[$i];
+		push @points, sprintf("%f,%f", ($i+.5)*$scale_x, ($max-$v)*$scale_y);
+	}
+	if( $filled )
+	{
+		push @points, sprintf("%f,%f", ($#$data+.5)*$scale_x, $max*$scale_y);
+		push @points, sprintf("%f,%f", .5, $max*$scale_y);
+		$plot->appendChild( dataElement( 'polyline', undef, {
+				points => join(' ', @points),
+				stroke => 'none',
+				fill => '#fff',
+				opacity => '.5',
+			}));
+	}
+	else
+	{
+		$plot->appendChild( dataElement( 'polyline', undef, {
+				points => join(' ', @points),
+				stroke => '#080',
+				fill => 'none',
+				'stroke-width' => ($h / 100 > 2 ? $h / 100 : 2),
+				opacity => '.75',
+			}));
 	}
 }
 
@@ -781,6 +979,48 @@ sub day_dec
 		timegm(0,0,0,substr($d,6,2),substr($d,4,2)-1,substr($d,0,4)-1900) -
 		86400); # 1 Day
 	return sprintf("%d%02d%02d", 1900+$t[5], 1+$t[4], $t[3]);
+}
+
+sub month_inc
+{
+	my( $self, $d ) = @_;
+	my( $y, $m ) = (substr($d,0,4),substr($d,4,2));
+	if( $m == 12 )
+	{
+		$y++;
+		$m = 1;
+	}
+	else
+	{
+		$m++;
+	}
+	return sprintf("%d%02d", $y, $m);
+}
+
+sub month_dec
+{
+	my( $self, $d ) = @_;
+	my( $y, $m ) = (substr($d,0,4),substr($d,4,2));
+	if( $m == 1 )
+	{
+		$y--;
+		$m = 12;
+	}
+	else
+	{
+		$m--;
+	}
+	return sprintf("%d%02d", $y, $m);
+}
+
+sub year_inc
+{
+	return $_[1]+1;
+}
+
+sub year_dec
+{
+	return $_[1]-1;
 }
 
 sub now
@@ -820,6 +1060,48 @@ sub script
 	});
 
 	return $script;
+}
+
+=item y_axis_max MAX, LOGARITHMIC
+
+Round up MAX to 1s.f.
+
+=cut
+
+sub y_axis_max
+{
+	my( $m, $log ) = @_;
+	return 1 if $m < 1;
+	return 10 ** length($m) if $log;
+	my $frac = substr($m,1);
+	return $m if $frac == 0;
+	substr($m,0,1)++;
+	return $m - $frac;
+}
+
+=item y_axis_divisor MAX, LOWER, UPPER
+
+Find a divisor between LOWER and UPPER that maximises the number of zeroes in the fractions (e.g. MAX=800, LOWER=5, UPPER=10 will return 8 because 800/8 = 100).
+
+=cut
+
+sub y_axis_divisor
+{
+	my($m, $l, $u) = @_;
+	my $best = 0;
+	my $magic = $u;
+	for($l..$u)
+	{
+		my $frac = $m / $_;
+		next if int($frac) != $frac;
+		$frac =~ /(0*)$/;
+		if( length($1) >= $best )
+		{
+			$best = length($1);
+			$magic = $_;
+		}
+	}
+	return $magic;
 }
 
 1;
