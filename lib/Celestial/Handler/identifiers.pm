@@ -53,6 +53,54 @@ sub page
 	$height = 300 if !$height or $height =~ /\D/;
 	my $set = $vars{set};
 	my $granularity = $vars{granularity} || '';
+
+	$from =~ s/[^0-9]//sg;
+	$until =~ s/[^0-9]//sg;
+
+	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
+		or return $self->error( $CGI, "baseURL doesn't match any registered repository: $baseURL" );
+
+	my $mdf = $repo->getMetadataFormat('oai_dc')
+		or return $self->error( $CGI, "Repository does not have oai_dc: $baseURL");
+
+	if( defined($set) and length($set) ) {
+		unless(defined($set = $repo->getSetId($set))) {
+			return $self->error( $CGI, "Set not found in repository: $vars{set}");
+		}
+	}
+
+	my $table = $mdf->table;
+	my $sm_table = $repo->setmemberships_table;
+	my $sets_table = $repo->sets_table;
+
+	my $tables = "`$table`";
+
+	my( @logic, @values );
+	if( $from and $until ) {
+		push @logic, "`accession` BETWEEN ? AND ?";
+		push @values, $from, $until;
+	} elsif( $from ) {
+		push @logic, "`accession` >= ?";
+		push @values, $from;
+	} elsif( $until ) {
+		push @logic, "`accession` <= ?";
+		push @values, $until;
+	}
+	if( $dataset ) {
+		push @logic, "`accession` >= ? AND `accession` < ? + INTERVAL 1 DAY";
+		push @values, $dataset, $dataset;
+	}
+	if( defined $set ) {
+		push @logic, "`set` = $set";
+		$tables .= " INNER JOIN `$sm_table` ON `id`=`record`";
+	}
+	my( @b4_logic, @b4_values );
+	if( $from )
+	{
+		push @b4_logic, "`accession` < ?";
+		push @b4_values, $from;
+	}
+
 	my( $date_format, $inc_method, $dec_method );
 	if( $granularity eq 'yearly' )
 	{
@@ -79,60 +127,6 @@ sub page
 		$until = substr($until,0,8) if $until;
 	}
 
-	$from =~ s/[^0-9]//sg;
-	$until =~ s/[^0-9]//sg;
-
-	my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
-		or return $self->error( $CGI, "baseURL doesn't match any registered repository: $baseURL" );
-
-	my $mdf = $repo->getMetadataFormat('oai_dc')
-		or return $self->error( $CGI, "Repository does not have oai_dc: $baseURL");
-
-	if( defined($set) and length($set) ) {
-		unless(defined($set = $repo->getSetId($set))) {
-			return $self->error( $CGI, "Set not found in repository: $vars{set}");
-		}
-	}
-
-	my $table = $mdf->table;
-	my $sm_table = $repo->setmemberships_table;
-	my $sets_table = $repo->sets_table;
-
-	my $tables = "`$table`";
-
-	my @logic;
-	my @values;
-	if( $from and $until ) {
-		push @logic, "`accession` BETWEEN ? AND ?";
-		# Annoyingly MySQL will accept YYYYMM but not YYYY?
-		if( $granularity eq 'yearly' )
-		{
-			push @values, $from . '0101', $until . '1231';
-		}
-		elsif( $granularity eq 'monthly' )
-		{
-			push @values, $from . '01', $until . '31';
-		}
-		else
-		{
-			push @values, $from, $until;
-		}
-	} elsif( $from ) {
-		push @logic, "`accession` >= ?";
-		push @values, $from;
-	} elsif( $until ) {
-		push @logic, "`accession` <= ?";
-		push @values, $until;
-	}
-	if( $dataset ) {
-		push @logic, "`accession` >= ? AND `accession` < ? + INTERVAL 1 DAY";
-		push @values, $dataset, $dataset;
-	}
-	if( defined $set ) {
-		push @logic, "`set` = $set";
-		$tables .= " INNER JOIN `$sm_table` ON `id`=`record`";
-	}
-
 	if( $format eq 'graph' )
 	{
 		$self->{colors} = {
@@ -140,6 +134,18 @@ sub page
 			x_axis => '#000',
 		};
 		
+		my $sum = 0;
+		# We need to fetch the total before the period for cumulative total
+		if( $cumu and @b4_logic )
+		{
+			my $SQL = "SELECT COUNT(*) AS `c` FROM $tables WHERE " . join(' AND ', @b4_logic);
+warn "$SQL $b4_values[0]";
+			my $sth = $dbh->prepare($SQL);
+			$sth->execute(@b4_values)
+				or return $self->error( $CGI, $dbh->errstr);
+			($sum) = $sth->fetchrow_array;
+		}
+
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
 #return $self->error($CGI, "Executing: ".join(',',@values,$SQL));
 		my $sth = $dbh->prepare($SQL);
@@ -148,7 +154,6 @@ sub page
 
 		my @DATA = ([],[],[]);
 		my $max = 0;
-		my $sum = 0;
 		while(my($day,$c) = $sth->fetchrow_array)
 		{
 			push @{$DATA[0]}, $day;
@@ -175,7 +180,7 @@ sub page
 			for(my $i = $DATA[0]->[0]; $DATA[0]->[0] > $from; $i = &$dec_method($self,$i)) {
 				unshift @{$DATA[0]}, $i;
 				unshift @{$DATA[1]}, 0;
-				unshift @{$DATA[2]}, 0;
+				unshift @{$DATA[2]}, $DATA[2]->[0];
 				if( @{$DATA[0]} > 10000 ) {
 					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points [from: $DATA[0]->[0] > $from = $i]\n");
 				}
@@ -210,12 +215,12 @@ sub page
 		my $svg = $self->svg($CGI,$w,$h);
 
 		my $x = 0; my $y = 0;
-		my $max_x = $w; my $max_y = $h;
+		my $max_x = $w-1; my $max_y = $h-1;
 
-		$x += 15;
-		$y += 1;
-		$max_x -= 1;
-#		$max_y -= 5;
+#		$x += 1;
+#		$y += 1;
+#		$max_x -= 1;
+#		$max_y -= 1;
 
 		$svg->appendChild( dataElement( 'desc', 'Deposits per Day' ));
 #		$svg->appendChild( dataElement( 'rect', undef, {
@@ -232,6 +237,13 @@ sub page
 #		transform => "translate($w $h) rotate(180)"
 					}));
 
+		my $title_height = ($max_y-$y) / 10;
+		$self->svg_title( $ctx, $x + ($max_x-$x) / 2, $y, $title_height, 'Deposits', 'center' );
+		$self->svg_title( $ctx, $x, $y, $title_height, 'Cumulative', 'left' );
+		$y += $self->svg_title( $ctx, $max_x, $y, $title_height, 'Per Day', 'right' );
+
+		$y += 5;
+
 		if( $scale_max eq 'log' ) {
 			$sum = y_axis_max($sum, 1);
 			$max = y_axis_max($max, 1);
@@ -243,17 +255,27 @@ sub page
 		$max_y -= 15;
 		if( $cumu ) {
 			$self->{colors}->{y_axis} = '#080';
-			if( $logy_cumu ) {
-				$x += $self->svg_log_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
-			} else {
-				$x += $self->svg_y_axis( $ctx, 0, $sum, $x, $y, $max_y-$y );
-			}
-		} else {
+			my $f = $logy_cumu ? \&svg_log_y_axis : \&svg_y_axis;
+			$x += &$f( $self, $ctx, 0, $sum, $x, $y, $max_y-$y );
+
 			if( $logy ) {
-				$x += $self->svg_log_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+				$self->{colors}->{y_axis_right} = 'shaded';
+				$f = \&svg_log_y_axis_right;
 			} else {
-				$x += $self->svg_y_axis( $ctx, 0, $max, $x, $y, $max_y-$y );
+				$self->{colors}->{y_axis_right} = '#00a';
+				$f = \&svg_y_axis_right;
 			}
+			$max_x -= &$f( $self, $ctx, 0, $max, $max_x, $y, $max_y-$y );
+		} else {
+			my $f;
+			if( $logy ) {
+				$self->{colors}->{y_axis} = 'shaded';
+				$f = \&svg_log_y_axis;
+			} else {
+				$self->{colors}->{y_axis} = '#00a';
+				$f = \&svg_y_axis;
+			}
+			$x += &$f( $self, $ctx, 0, $max, $x, $y, $max_y-$y );
 		}
 		$max_y += 15;
 		$self->svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
@@ -274,7 +296,7 @@ sub page
 
 		my $f = $logy ? \&svg_log_y_plot_series : \&svg_plot_series;
 		if( $cumu ) {
-			&$f( $self, $ctx, $l, @DATA[0,1], $max * ($logy ? 4 : 1.5), $x, $y, $max_x-$x, $max_y-$y );
+			&$f( $self, $ctx, $l, @DATA[0,1], $max, $x, $y, $max_x-$x, $max_y-$y );
 		} else {
 			&$f( $self, $ctx, $l, @DATA[0,1], $max, $x, $y, $max_x-$x, $max_y-$y );
 		}
@@ -609,13 +631,86 @@ sub svg
 	return $svg;
 }
 
+sub svg_title
+{
+	my( $self, $svg, $x, $y, $h, $text, $align ) = @_;
+
+	my $size = $h * .75;
+
+	$align ||= 'center';
+	my $anchor = $align eq 'left' ? 'start' : $align eq 'center' ? 'middle' : 'end';
+
+	$svg->appendChild( dataElement( 'text', $text, {
+		x => $x,
+		y => $y + $size,
+		style => "font-family: sans-serif; font-size: ${size}px; font-weight: bold; text-align: $align; text-anchor: $anchor",
+	}));
+
+	return $h;
+}
+
+sub power10_label
+{
+	my( $val ) = @_;
+	my $p = length("$val") - 1;
+	return [
+		'10',
+		dataElement( 'tspan', $p, {
+			dy => -5,
+			'font-size' => '80%',
+		})
+	];
+}
+
+sub svg_y_tick
+{
+	my( $self, $svg, $w, $y, $label, $color ) = @_;
+
+	my $tick_width = 4;
+
+	$svg->appendChild( dataElement( 'rect', undef, {
+		x => $w - $tick_width,
+		y => $y,
+		width => $tick_width,
+		height => 1,
+		($color ? (fill => $color) : ()),
+	}));
+	$svg->appendChild( dataElement( 'text', $label, {
+		x => $w - $tick_width - 2,
+		y => $y + 5,
+		style => 'text-align:right;text-anchor:end;',
+		($color ? (fill => $color) : ()),
+	}));
+}
+
+sub svg_y_tick_right
+{
+	my( $self, $svg, $w, $y, $label, $color ) = @_;
+
+	my $tick_width = 4;
+
+	$svg->appendChild( dataElement( 'rect', undef, {
+		x => -1 * $w,
+		y => $y,
+		width => $tick_width,
+		height => 1,
+		($color ? (fill => $color) : ()),
+	}));
+	$svg->appendChild( dataElement( 'text', $label, {
+		x => -1 * $w + $tick_width + 2,
+		y => $y + 5,
+		style => 'text-align:left;text-anchor:start;',
+		($color ? (fill => $color) : ()),
+	}));
+}
+
 sub svg_log_y_axis
 {
 	my( $self, $svg, $min, $max, $x, $y, $h ) = @_;
 
 	return 0 if $max-$min <= 0;
 
-	my $w = length("$max") * 6; # 5 pixels-ish per char
+	my $w = 4 + 3 * 8; # 5 pixels-ish per char
 	my $tick_width = 4;
 
 	my $dy = log10(1+$max-$min);
@@ -624,27 +719,61 @@ sub svg_log_y_axis
 
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
-		'font-family' => 'sans-serif',
-		'font-size' => '10pt',
-		fill => 'black',
+		style => 'font-family: sans-serif; font-size: 12px',
 	}));
 
 	my $step = int($dy/10);
-	for(my $i = 1; $i < $max; $i = $i."0" ) {
-		$ctx->appendChild( dataElement( 'rect', undef, {
-			x => $w - $tick_width,
-			y => ($dy-log10($i+1))*$scale_y,
-			width => $tick_width,
-			height => 1,
-			fill => $self->{colors}->{y_axis},
-		}));
-		$ctx->appendChild( dataElement( 'text', $i, {
-			x => $w - $tick_width - 2,
-			y => ($dy-log10($i+1))*$scale_y+5,
-			#y => ($dy-$i)*$scale_y,
-			style => 'text-align:right;text-anchor:end;',
-			fill => $self->{colors}->{y_axis},
-		}));
+	for(my $i = 1; $i <= $max; $i = $i."0" ) {
+		my $color = $self->{colors}->{y_axis};
+		if( $color eq 'shaded' ) {
+			my $r = int(255*log10($i)/log10($max));
+			my $b = 255-int(255*log10($i)/log10($max));
+			$color = sprintf("#%02x00%02x",$r,$b);
+		}
+		$self->svg_y_tick(
+			$ctx,
+			$w,
+			($dy-log10($i+1))*$scale_y,
+			power10_label($i),
+			$color
+		);
+	}
+	
+	return $w;
+}
+
+sub svg_log_y_axis_right
+{
+	my( $self, $svg, $min, $max, $x, $y, $h ) = @_;
+
+	my $w = 4 + 3 * 8; # 6 pixels-ish per char
+
+	my $dy = log10(1+$max);
+
+	return 0 if $max == 0;
+
+	my $scale_y = $h/$dy;
+
+	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
+		transform => "translate($x $y) scale(1 1)",
+		style => 'font-family: sans-serif; font-size: 12px',
+	}));
+
+	my $step = int($dy/10);
+	for(my $i = 1; $i <= $max; $i = $i."0" ) {
+		my $color = $self->{colors}->{y_axis_right};
+		if( $color eq 'shaded' ) {
+			my $r = int(255*log10($i)/log10($max));
+			my $b = 255-int(255*log10($i)/log10($max));
+			$color = sprintf("#%02x00%02x",$r,$b);
+		}
+		$self->svg_y_tick_right(
+			$ctx,
+			$w,
+			($dy-log10($i+1))*$scale_y,
+			power10_label($i),
+			$color
+		);
 	}
 	
 	return $w;
@@ -654,7 +783,7 @@ sub svg_y_axis
 {
 	my( $self, $svg, $min, $max, $x, $y, $h ) = @_;
 
-	my $w = length("$max") * 6; # 5 pixels-ish per char
+	my $w = 4 + length("$max") * 8; # 5 pixels-ish per char
 	my $tick_width = 4;
 
 	my $dy = $max-$min;
@@ -671,41 +800,55 @@ sub svg_y_axis
 
 	my $divisor = y_axis_divisor($dy, $min_ticks, $max_ticks);
 
-	my $color = $self->{colors}->{y_axis};
-
 	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
 		transform => "translate($x $y) scale(1 1)",
-		fill => $color,
 		style => 'fony-family: sans-serif; font-size: 12px;',
+		fill => $self->{colors}->{y_axis},
 	}));
 
 	my $step = int($dy/$divisor) || 1;
 	
 	my $i;
-	for($i = 0; $i < $max; $i += $step ) {
-		$ctx->appendChild( dataElement( 'rect', undef, {
-			x => $w - $tick_width,
-			y => ($dy-$i)*$scale_y,
-			width => $tick_width,
-			height => 1,
-		}));
-		$ctx->appendChild( dataElement( 'text', $i, {
-			x => $w - $tick_width - 2,
-			y => ($dy-$i)*$scale_y+5,
-			style => 'text-align:right;text-anchor:end;',
-		}));
+	for($i = 0; $i <= $max; $i += $step ) {
+		$self->svg_y_tick( $ctx, $w, ($dy-$i)*$scale_y, $i );
 	}
-	$ctx->appendChild( dataElement( 'rect', undef, {
-		x => $w - $tick_width,
-		y => ($dy-$i)*$scale_y,
-		width => $tick_width,
-		height => 1,
+	
+	return $w;
+}
+
+sub svg_y_axis_right
+{
+	my( $self, $svg, $min, $max, $x, $y, $h ) = @_;
+
+	my $w = 4 + length("$max") * 8; # 5 pixels-ish per char
+	my $tick_width = 4;
+
+	my $dy = $max-$min;
+
+	return 0 if $dy == 0;
+
+	my $scale_y = $h/$dy;
+
+	# At least 15 pixels between ticks
+	my $max_ticks = $h / 15 > 20 ? 20 : int($h / 15);
+	$max_ticks = 2 if $max_ticks < 2;
+	my $min_ticks = int($max_ticks/2);
+	$min_ticks = 2 if $min_ticks < 2;
+
+	my $divisor = y_axis_divisor($dy, $min_ticks, $max_ticks);
+
+	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
+		transform => "translate($x $y) scale(1 1)",
+		style => 'fony-family: sans-serif; font-size: 12px;',
+		fill => $self->{colors}->{y_axis_right},
 	}));
-	$ctx->appendChild( dataElement( 'text', $i, {
-		x => $w - $tick_width - 2,
-		y => ($dy-$i)*$scale_y+10,
-		style => 'text-align:right;text-anchor:end;',
-	}));
+
+	my $step = int($dy/$divisor) || 1;
+	
+	my $i;
+	for($i = 0; $i <= $max; $i += $step ) {
+		$self->svg_y_tick_right( $ctx, $w, ($dy-$i)*$scale_y, $i );
+	}
 	
 	return $w;
 }
@@ -765,7 +908,7 @@ sub svg_x_axis
 		height => 5
 	}));
 	
-	if( $x > 25 )
+	if( $x > length($pts->[0]) * 8 / 2 )
 	{
 		$ctx->appendChild( dataElement( 'text', $pts->[0], {
 			x => .5*$scale_x,
