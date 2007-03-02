@@ -139,7 +139,7 @@ sub content_type {
 
 sub valid_email {
 	my( $self, $email ) = @_;
-	return $email =~ /^[A-Za-z0-9_\-]+\@(?:[A-Za-z0-9_\-]+\.)+[A-Za-z]{2,4}$/;
+	return $email =~ /^[A-Za-z0-9_\.\-]+\@(?:[A-Za-z0-9_\-]+\.)+[A-Za-z]{2,4}$/;
 }
 
 sub set_cookie {

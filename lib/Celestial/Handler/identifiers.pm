@@ -825,6 +825,7 @@ sub svg_log_y_plot_series
 		$l->query_form(%qry);
 		my $r = int(255*$v/$color_max);
 		my $b = 255-int(255*$v/$color_max);
+		die("Error: colors went wrong ($v/$color_max): $r / $b") if $r > 255 or $b > 255;
 		$v = log10($v+1);
 		$plot->appendChild( dataElement( 'a', dataElement( 'rect', undef, {
 						x => $i*$scale_x,
