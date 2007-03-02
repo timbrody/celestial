@@ -800,7 +800,7 @@ sub svg_log_y_plot_series
 {
 	my( $self, $svg, $l, $labels, $data, $max, $x, $y, $w, $h ) = @_;
 	
-	return 0 if $max <= 0;
+	return 0 if $max <= 0 or @$data == 0;
 	
 	$max = log10($max+1);
 
