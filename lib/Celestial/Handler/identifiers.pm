@@ -134,7 +134,7 @@ sub page
 			x_axis => '#000',
 		};
 		
-		my $sum = 0;
+		my $sum_b4 = 0;
 		# We need to fetch the total before the period for cumulative total
 		if( $cumu and @b4_logic )
 		{
@@ -142,7 +142,7 @@ sub page
 			my $sth = $dbh->prepare($SQL);
 			$sth->execute(@b4_values)
 				or return $self->error( $CGI, $dbh->errstr);
-			($sum) = $sth->fetchrow_array;
+			($sum_b4) = $sth->fetchrow_array;
 		}
 
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS `d`,COUNT(*) AS `c` FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY `d` ORDER BY `d` ASC"; 
@@ -151,8 +151,10 @@ sub page
 		$sth->execute(@values)
 			or return $self->error( $CGI, $dbh->errstr);
 
+		# Read daily/monthly/yearly totals from database
 		my @DATA = ([],[],[]);
 		my $max = 0;
+		my $sum = $sum_b4;
 		while(my($day,$c) = $sth->fetchrow_array)
 		{
 			push @{$DATA[0]}, $day;
@@ -160,6 +162,8 @@ sub page
 			push @{$DATA[2]}, $sum += $c;
 			$max = $c if $c > $max;
 		}
+		
+		# Fill in gaps in the data
 		for(my $i = 0; $i < $#{$DATA[0]}; $i++)
 		{
 			my $n = &$inc_method($self,$DATA[0]->[$i]);
@@ -175,16 +179,18 @@ sub page
 			}
 		}
 
+		# Extend the data to $from
 		if( @{$DATA[0]} and $from ) {
 			for(my $i = $DATA[0]->[0]; $DATA[0]->[0] > $from; $i = &$dec_method($self,$i)) {
 				unshift @{$DATA[0]}, $i;
 				unshift @{$DATA[1]}, 0;
-				unshift @{$DATA[2]}, $DATA[2]->[0];
+				unshift @{$DATA[2]}, $sum_b4;
 				if( @{$DATA[0]} > 10000 ) {
 					return $self->error( $CGI, "Internal Error: Can't plot more than 10000 data points [from: $DATA[0]->[0] > $from = $i]\n");
 				}
 			}
 		}
+		# Extend the data to $until
 		if( @{$DATA[0]} and $until ) {
 			for(my $i = $DATA[0]->[$#{$DATA[0]}]; $DATA[0]->[$#{$DATA[0]}] < $until; $i = &$inc_method($self,$i)) {
 				push @{$DATA[0]}, $i;
@@ -196,21 +202,9 @@ sub page
 			}
 		}
 
-		# Make x-axis draw something
+		# Make x-axis at least draw the range
 		if( !@{$DATA[0]} and $from and $until ) {
 			push @{$DATA[0]}, $from, $until;
-		}
-
-		if( $granularity eq 'yearly' ) {
-		} elsif( $granularity eq 'monthly' ) {
-			for(@{$DATA[0]}) {
-#				substr($_,4,0) = '-';
-			}
-		} else {
-			for(@{$DATA[0]}) {
-#				substr($_,4,0) = '-';
-#				substr($_,7,0) = '-';
-			}
 		}
 
 		my $w = $width;
@@ -220,11 +214,6 @@ sub page
 
 		my $x = 0; my $y = 0;
 		my $max_x = $w-1; my $max_y = $h-1;
-
-#		$x += 1;
-#		$y += 1;
-#		$max_x -= 1;
-#		$max_y -= 1;
 
 		$svg->appendChild( dataElement( 'desc', 'Deposits per Day' ));
 #		$svg->appendChild( dataElement( 'rect', undef, {
@@ -241,6 +230,7 @@ sub page
 #		transform => "translate($w $h) rotate(180)"
 					}));
 
+		# Draw some explanatory titles
 		my $title_height = ($max_y-$y) / 10;
 		if( $cumu )
 		{
@@ -255,6 +245,7 @@ sub page
 
 		$y += 5;
 
+		# Recalculate the max values to make the y-axis fixed
 		if( $scale_max eq 'log' ) {
 			$sum = y_axis_max($sum, 1);
 			$max = y_axis_max($max, 1);
@@ -263,6 +254,7 @@ sub page
 			$max = y_axis_max($max, $logy);
 		}
 		
+		# Draw the left/right y-axis 
 		$max_y -= 15;
 		if( $cumu ) {
 			$self->{colors}->{y_axis} = '#080';
@@ -288,10 +280,13 @@ sub page
 			}
 			$x += &$f( $self, $ctx, 0, $max, $x, $y, $max_y-$y );
 		}
+
+		# Draw the x-axis
 		$max_y += 15;
 		$self->svg_date_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
 		$max_y -= 15;
 
+		# Graph background
 		$ctx->appendChild( dataElement( 'rect', undef, {
 					x => $x,
 					y => $y,
@@ -305,6 +300,7 @@ sub page
 		my $l = URI->new('', 'http');
 		$l->query_form(%{{%vars, format => ''}});
 
+		# Plot the series
 		my $f = $logy ? \&svg_log_y_plot_series : \&svg_plot_series;
 		if( $cumu ) {
 			&$f( $self, $ctx, $l, @DATA[0,1], $max, $x, $y, $max_x-$x, $max_y-$y );
