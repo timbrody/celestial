@@ -139,7 +139,6 @@ sub page
 		if( $cumu and @b4_logic )
 		{
 			my $SQL = "SELECT COUNT(*) AS `c` FROM $tables WHERE " . join(' AND ', @b4_logic);
-warn "$SQL $b4_values[0]";
 			my $sth = $dbh->prepare($SQL);
 			$sth->execute(@b4_values)
 				or return $self->error( $CGI, $dbh->errstr);
@@ -197,15 +196,20 @@ warn "$SQL $b4_values[0]";
 			}
 		}
 
+		# Make x-axis draw something
+		if( !@{$DATA[0]} and $from and $until ) {
+			push @{$DATA[0]}, $from, $until;
+		}
+
 		if( $granularity eq 'yearly' ) {
 		} elsif( $granularity eq 'monthly' ) {
 			for(@{$DATA[0]}) {
-				substr($_,4,0) = '-';
+#				substr($_,4,0) = '-';
 			}
 		} else {
 			for(@{$DATA[0]}) {
-				substr($_,4,0) = '-';
-				substr($_,7,0) = '-';
+#				substr($_,4,0) = '-';
+#				substr($_,7,0) = '-';
 			}
 		}
 
@@ -238,9 +242,16 @@ warn "$SQL $b4_values[0]";
 					}));
 
 		my $title_height = ($max_y-$y) / 10;
-		$self->svg_title( $ctx, $x + ($max_x-$x) / 2, $y, $title_height, 'Deposits', 'center' );
-		$self->svg_title( $ctx, $x, $y, $title_height, 'Cumulative', 'left' );
-		$y += $self->svg_title( $ctx, $max_x, $y, $title_height, 'Per Day', 'right' );
+		if( $cumu )
+		{
+			$self->svg_title( $ctx, $x + ($max_x-$x) / 2, $y, $title_height, 'Deposits', 'center' );
+			$self->svg_title( $ctx, $x, $y, $title_height, 'Cumulative', 'left' );
+			$y += $self->svg_title( $ctx, $max_x, $y, $title_height, 'Per Day', 'right' );
+		}
+		else
+		{
+			$y += $self->svg_title( $ctx, $x + ($max_x-$x) / 2, $y, $title_height, 'Deposits', 'center' );
+		}
 
 		$y += 5;
 
@@ -278,7 +289,7 @@ warn "$SQL $b4_values[0]";
 			$x += &$f( $self, $ctx, 0, $max, $x, $y, $max_y-$y );
 		}
 		$max_y += 15;
-		$self->svg_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
+		$self->svg_date_x_axis( $ctx, $DATA[0], $x, $max_y, $max_x-$x, 15, {} );
 		$max_y -= 15;
 
 		$ctx->appendChild( dataElement( 'rect', undef, {
@@ -662,6 +673,27 @@ sub power10_label
 	];
 }
 
+sub svg_x_tick
+{
+	my( $self, $svg, $x, $h, $label, $color ) = @_;
+
+	my $tick_width = 4;
+
+	$svg->appendChild( dataElement( 'rect', undef, {
+		x => $x,
+		y => -1 * $h,
+		width => 1,
+		height => $tick_width,
+		($color ? (fill => $color) : ()),
+	}));
+	$svg->appendChild( dataElement( 'text', $label, {
+		x => $x,
+		y => 0,
+		style => 'text-align:center;text-anchor:middle;',
+		($color ? (fill => $color) : ()),
+	}));
+}
+
 sub svg_y_tick
 {
 	my( $self, $svg, $w, $y, $label, $color ) = @_;
@@ -726,8 +758,8 @@ sub svg_log_y_axis
 	for(my $i = 1; $i <= $max; $i = $i."0" ) {
 		my $color = $self->{colors}->{y_axis};
 		if( $color eq 'shaded' ) {
-			my $r = int(255*log10($i)/log10($max));
-			my $b = 255-int(255*log10($i)/log10($max));
+			my $r = int(255*log10($i)/log10($max+1));
+			my $b = 255-int(255*log10($i)/log10($max+1));
 			$color = sprintf("#%02x00%02x",$r,$b);
 		}
 		$self->svg_y_tick(
@@ -899,6 +931,125 @@ sub svg_x_axis
 			style => 'text-align:center;text-anchor:middle;',
 		}));
 	}
+
+	# Left-align the first point
+	$ctx->appendChild( dataElement( 'rect', undef, {
+		x => .5*$scale_x,
+		y => -1*$h,
+		width => 1,
+		height => 5
+	}));
+	
+	if( $x > length($pts->[0]) * 8 / 2 )
+	{
+		$ctx->appendChild( dataElement( 'text', $pts->[0], {
+			x => .5*$scale_x,
+			style => 'text-align:center;text-anchor:middle;',
+		}));
+	}
+	else
+	{
+		$ctx->appendChild( dataElement( 'text', $pts->[0], {
+			x => $x * -1,
+			style => 'text-align:left;text-anchor:start;',
+		}));
+	}
+
+	# Right-align the last point
+	$ctx->appendChild( dataElement( 'rect', undef, {
+		x => $#$pts*$scale_x+.5*$scale_x,
+		y => -1*$h,
+		width => 1,
+		height => 5
+	}));
+			
+	$ctx->appendChild( dataElement( 'text', $pts->[$#$pts], {
+		x => $w,
+		style => 'text-align:right;text-anchor:end;',
+	}));
+	
+	return $h;
+}
+
+sub svg_date_x_axis
+{
+	my( $self, $svg, $pts, $x, $y, $w, $h, $opts ) = @_;
+	$opts ||= {};
+
+	return 0 if @$pts == 0;
+
+	my $res = length($pts->[0]);
+	my $scale_x = $w / @$pts;
+
+	my $range = period_diff($pts->[0],$pts->[$#$pts]);
+	# Reduce the date resolution if we have a long period
+	# More than six years
+	if( $range >= 6 * 365 and $res > 4 )
+	{
+		$res = 4;
+		$_ = substr($_,4,2) eq '01' ? substr($_,0,4) : undef for @$pts;
+	}
+	# More than three years
+	elsif( $range >= 3 * 365 and $res > 6 )
+	{
+		$res = 6;
+		$_ = (substr($_,4,4) eq '0101' or substr($_,4,4) eq '0701')
+			? substr($_,0,6) : undef for @$pts;
+	}
+	# More than 3 months
+	elsif( $range >= 3 * 30 and $res > 6 )
+	{
+		$res = 6;
+		$_ = substr($_,6,2) eq '01' ? substr($_,0,6) : undef for @$pts;
+	}
+
+	my $len = 4 * 8;
+	if( $res == 8 ) {
+		$len = 10 * 8;
+		defined($_) and substr($_,6,0) = '-' for @$pts;
+		defined($_) and substr($_,4,0) = '-' for @$pts;
+	} elsif( $res == 6 ) {
+		$len = 6 * 8;
+		defined($_) and substr($_,4,0) = '-' for @$pts;
+	}
+
+	my $max_x_ticks = $w/$len;
+
+	# Show only defined values
+	my @show = map { defined $_ } @$pts;
+
+	# Don't overlap labels
+	my $prev;
+	for(my $i = 0; $i < @show; $i++ )
+	{
+		next unless $show[$i];
+		if( not defined($prev) ) {
+			$prev = $i;
+			next;
+		}
+		if( $scale_x * $prev + $len > $i * $scale_x )
+		{
+			$show[$i] = 0;
+		}
+		else
+		{
+			$prev = $i;
+		}
+	}
+	
+	$svg->appendChild( my $ctx = dataElement( 'g', undef, {
+		transform => "translate($x $y) scale(1 1)",
+		fill => $self->{colors}->{x_axis},
+		style => 'font-family: sans-serif; font-size: 12px',
+	}));
+
+	for(my $i = 1; $i < $#$pts; $i++) {
+		next unless $show[$i];
+
+		$self->svg_x_tick( $ctx, $i*$scale_x+.5*$scale_x, $h, $pts->[$i] );
+	}
+
+	return $h;
 
 	# Left-align the first point
 	$ctx->appendChild( dataElement( 'rect', undef, {
@@ -1179,6 +1330,39 @@ sub now
 	$sth->execute() or die $self->dbh->errstr;
 	my ($d) = $sth->fetchrow_array;
 	return $d;
+}
+
+sub period_diff
+{
+	my( $f, $u ) = @_;
+	$f .= '01' while length($f) < 8;
+	if( length($u) == 4 )
+	{
+		$u .= '1231';
+	}
+	elsif( length($u) == 6 )
+	{
+		if( substr($u,4,2) == 12 )
+		{
+			$u .= '31';
+		}
+		else
+		{
+			$u = timegm(0,0,0,1,substr($u,4,2)+1,substr($u,0,4));
+			$u -= 86400;
+			my @t = gmtime($u);
+			$u = sprintf("%d%02d%02d",$t[5]+1900,$t[4]+1,$t[3]);
+		}
+	}
+	return date_diff($f,$u);
+}
+
+sub date_diff
+{
+	my( $f, $u ) = @_;
+	$f = timegm(0,0,0,substr($f,6,2),substr($f,4,2),substr($f,0,4));
+	$u = timegm(0,0,0,substr($u,6,2),substr($u,4,2),substr($u,0,4));
+	return ($u - $f) / 86400;
 }
 
 sub log10
