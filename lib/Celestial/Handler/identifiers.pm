@@ -791,8 +791,8 @@ sub svg_log_y_axis_right
 	for(my $i = 1; $i <= $max; $i = $i."0" ) {
 		my $color = $self->{colors}->{y_axis_right};
 		if( $color eq 'shaded' ) {
-			my $r = int(255*log10($i)/log10($max));
-			my $b = 255-int(255*log10($i)/log10($max));
+			my $r = int(255*log10($i)/log10($max+1));
+			my $b = 255-int(255*log10($i)/log10($max+1));
 			$color = sprintf("#%02x00%02x",$r,$b);
 		}
 		$self->svg_y_tick_right(
