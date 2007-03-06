@@ -95,11 +95,13 @@ function focusBar(bar, dir)
 	var flow = bar.flow;
 
 	bar.setAttribute('width', bar.origWidth + scale);
-	bar.setAttribute('x', bar.origX - scale / 2 - flow);
+	// bar.setAttribute('x', bar.origX - scale / 2 - flow);
+	bar.setAttribute('x', bar.origX - scale / 2);
 
 	var steps = 8;
 	var step = Math.PI/steps;
-	var dx = scale/2 + flow;
+	//var dx = scale/2 + flow;
+	var dx = scale/2;
 	for(var i = steps/2; a != null; i--)
 	{
 		if( a.nodeName != 'a' )
@@ -121,7 +123,8 @@ function focusBar(bar, dir)
 	}
 
 	a = bar.parentNode.nextSibling;
-	dx = scale/2 - flow;
+	//dx = scale/2 - flow;
+	dx = scale/2;
 	for(var i = steps/2; a != null; i++)
 	{
 		if( a.nodeName != 'a' )

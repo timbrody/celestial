@@ -128,8 +128,8 @@ foreach my $repo (@repos)
 	my( $low, $medium, $high ) = (0,0,0);
 	while(my( $d, $c ) = $sth->fetchrow_array)
 	{
-		$low++ if $c > 0;
-		$medium++ if $c >= 10;
+		$low++ if $c > 0 and $c < 10;
+		$medium++ if $c >= 10 and $c < 100;
 		$high++ if $c >= 100;
 	}
 

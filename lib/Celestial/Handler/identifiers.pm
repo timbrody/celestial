@@ -1269,47 +1269,49 @@ sub chart_date_x_axis
 	my( $self, $chart, $pts, $x, $y, $w, $h, $opts ) = @_;
 	$opts ||= {};
 
-	return 0 if @$pts == 0;
+	my @labels = @$pts;
 
-	my $res = length($pts->[0]);
-	my $scale_x = $w / @$pts;
+	return 0 if @labels == 0;
 
-	my $range = period_diff($pts->[0],$pts->[$#$pts]);
+	my $res = length($labels[0]);
+	my $scale_x = $w / @labels;
+
+	my $range = period_diff($labels[0],$labels[$#labels]);
 	# Reduce the date resolution if we have a long period
 	# More than six years
 	if( $range >= 6 * 365 and $res > 4 )
 	{
 		$res = 4;
-		$_ = substr($_,4,2) eq '01' ? substr($_,0,4) : undef for @$pts;
+		$_ = substr($_,4,2) eq '01' ? substr($_,0,4) : undef for @labels;
 	}
 	# More than three years
 	elsif( $range >= 3 * 365 and $res > 6 )
 	{
 		$res = 6;
 		$_ = (substr($_,4,4) eq '0101' or substr($_,4,4) eq '0701')
-			? substr($_,0,6) : undef for @$pts;
+			? substr($_,0,6) : undef for @labels;
 	}
 	# More than 3 months
 	elsif( $range >= 3 * 30 and $res > 6 )
 	{
 		$res = 6;
-		$_ = substr($_,6,2) eq '01' ? substr($_,0,6) : undef for @$pts;
+		$_ = substr($_,6,2) eq '01' ? substr($_,0,6) : undef for @labels;
 	}
 
 	my $len = 4 * 8;
 	if( $res == 8 ) {
 		$len = 10 * 8;
-		defined($_) and substr($_,6,0) = '-' for @$pts;
-		defined($_) and substr($_,4,0) = '-' for @$pts;
+		defined($_) and substr($_,6,0) = '-' for @labels;
+		defined($_) and substr($_,4,0) = '-' for @labels;
 	} elsif( $res == 6 ) {
 		$len = 6 * 8;
-		defined($_) and substr($_,4,0) = '-' for @$pts;
+		defined($_) and substr($_,4,0) = '-' for @labels;
 	}
 
 	my $max_x_ticks = $w/$len;
 
 	# Show only defined values
-	my @show = map { defined $_ } @$pts;
+	my @show = map { defined $_ } @labels;
 
 	# Don't overlap labels
 	my $prev;
@@ -1338,18 +1340,18 @@ sub chart_date_x_axis
 			style => 'font-family: sans-serif; font-size: 12px',
 		}));
 
-		for(my $i = 1; $i < $#$pts; $i++) {
+		for(my $i = 1; $i < $#labels; $i++) {
 			next unless $show[$i];
 
-			$self->svg_x_tick( $chart, $i*$scale_x+.5*$scale_x, $h, $pts->[$i] );
+			$self->svg_x_tick( $chart, $i*$scale_x+.5*$scale_x, $h, $labels[$i] );
 		}
 	}
 	else
 	{
-		for(my $i = 1; $i < $#$pts; $i++) {
+		for(my $i = 1; $i < $#labels; $i++) {
 			next unless $show[$i];
 
-			$self->gd_x_tick( $chart, $x + $i*$scale_x+.5*$scale_x, $y-$h, $pts->[$i] );
+			$self->gd_x_tick( $chart, $x + $i*$scale_x+.5*$scale_x, $y-$h, $labels[$i] );
 		}
 	}
 
@@ -1383,7 +1385,8 @@ sub chart_log_y_plot_series
 		{
 			my $v = $data->[$i] or next;
 			my %qry = $l->query_form;
-			$qry{dataset} = $labels->[$i];
+			$qry{dataset} = $labels->[$i]
+				or die "Undefined label?";
 			$l->query_form(%qry);
 			my $r = int(255*$v/$color_max);
 			my $b = 255-int(255*$v/$color_max);
