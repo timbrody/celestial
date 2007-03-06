@@ -575,7 +575,7 @@ sub body
 	$body->appendChild( dataElement( 'h2', 
 				$dataset ?
 				"$dataset - $total matching records" :
-				'No data set selected'
+				'No data set selected (click a bar on the graph)'
 				));
 	$body->appendChild( $summary );
 	$body->appendChild( $data );
