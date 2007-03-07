@@ -387,9 +387,6 @@ sub page
 		my $sth = $dbh->prepare($SQL);
 		$sth->execute(@values) or die "[$SQL] " . $dbh->errstr;
 		
-		my @data;
-		my $prev;
-
 		my $repo = $dbh->getRepository($dbh->getRepositoryBaseURL($baseURL))
 			or return $self->SUPER::error( $CGI, "baseURL doesn't match any registered repository");
 
@@ -398,24 +395,28 @@ sub page
 
 		$CGI->content_type('text/plain');
 		print join("\t", qw(date identifier url)), "\n";
-		while(my $row = $sth->fetch)
+
+		my @data;
+		my @prev;
+
+		while(my @row = $sth->fetchrow_array)
 		{
-			unless( $prev ) {
-				$prev = [@$row];
+			unless( @prev ) {
+				@prev = @row;
 				next;
 			}
-			if( $prev->[0] eq $row->[0] ) {
-				push @$prev, $row->[2];
+			if( $prev[0] == $row[0] ) {
+				push @prev, $row[3];
 				next;
 			}
-			my( $link, $title ) = $self->abstract_page( $mdf, $prev->[0] );
-			splice(@$prev,3,0,"$link");
-			print join("\t",splice(@$prev,1)), "\n";
-			$prev = [@$row];
+			my( $link, $title ) = $self->abstract_page( $mdf, $prev[0] );
+			splice(@prev,3,0,defined($link) ? "$link" : "");
+			print join("\t",@prev[1..$#prev]), "\n";
+			@prev = @row;
 		}
-		my( $link, $title ) = $self->abstract_page( $mdf, $prev->[0] );
-		splice(@$prev,3,0,"$link");
-		print join("\t",splice(@$prev,1)), "\n" if $prev;
+		my( $link, $title ) = $self->abstract_page( $mdf, $prev[0] );
+		splice(@prev,3,0,defined($link) ? "$link" : '');
+		print join("\t",@prev[1..$#prev]), "\n" if @prev;
 	}
 	else
 	{
