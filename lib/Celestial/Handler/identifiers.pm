@@ -409,13 +409,13 @@ sub page
 				push @prev, $row[3];
 				next;
 			}
-			my( $link, $title ) = $self->abstract_page( $mdf, $prev[0] );
-			splice(@prev,3,0,defined($link) ? "$link" : "");
+#			my( $link, $title ) = $self->abstract_page( $mdf, $prev[0] );
+#			splice(@prev,3,0,defined($link) ? "$link" : "");
 			print join("\t",@prev[1..$#prev]), "\n";
 			@prev = @row;
 		}
-		my( $link, $title ) = $self->abstract_page( $mdf, $prev[0] );
-		splice(@prev,3,0,defined($link) ? "$link" : '');
+#		my( $link, $title ) = $self->abstract_page( $mdf, $prev[0] );
+#		splice(@prev,3,0,defined($link) ? "$link" : '');
 		print join("\t",@prev[1..$#prev]), "\n" if @prev;
 	}
 	else
