@@ -1722,8 +1722,8 @@ sub script
 	my( $self, $CGI ) = @_;
 
 	my $script = dataElement( 'script', undef, {
-		type => 'text/ecmascript',
-		'xlink:href' => $CGI->as_link( 'static/ajax/handler/identifiers.js' ),
+#		type => 'text/ecmascript',
+#		'xlink:href' => $CGI->as_link( 'static/ajax/handler/identifiers.js' ),
 	});
 
 	return $script;
