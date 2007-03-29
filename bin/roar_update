@@ -28,6 +28,10 @@ List all configured repositories.
 
 Harvest only the repository given (use B<--list> to get a list of identifiers).
 
+=item B<--accession>
+
+Set accession dates using OAI data.
+
 =item B<--verbose>
 
 Be more verbose.
@@ -58,7 +62,7 @@ use Date::Parse;
 use File::Temp;
 
 our $opt_verbose;
-my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun );
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun, $opt_accession );
 $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
@@ -67,6 +71,7 @@ $opt_fulltext = 1;
 GetOptions(
 	'verbose+' => \$opt_verbose,
 	'list' => \$opt_list,
+	'accession' => \$opt_accession,
 	'repository=s' => \$opt_repository,
 	'help' => \$opt_help,
 	'cfg=s' => \$opt_cfg,
@@ -133,14 +138,50 @@ foreach my $repo (@repos)
 		$high++ if $c >= 100;
 	}
 
+	my $start_year = 1990;
+	$SQL = "SELECT YEAR(`accession`) AS d,COUNT(*) AS c FROM `$table` WHERE `accession` BETWEEN ${start_year}0000000000 AND NOW() GROUP BY d";
+	$sth = $dbh->prepare($SQL);
+	$sth->execute() or die $!;
+
+	my @years;
+	while(my( $y, $c ) = $sth->fetchrow_array)
+	{
+		$years[$y-$start_year] = $c;
+	}
+	my $s = 0;
+	$_ = $s += $_ || 0 for @years;
+
+	my $accession;
+
+	if( $opt_accession )
+	{
+		$SQL = "SELECT DATE_FORMAT(MIN(`accession`),'$Celestial::DBI::DATE_FORMAT') FROM `$table`";
+		$sth = $dbh->prepare($SQL);
+		$sth->execute() or die $!;
+
+		( $accession ) = $sth->fetchrow_array;
+	}
+
 	$SQL = "SELECT COUNT(*) FROM `$table`";
 	$sth = $dbh->prepare($SQL);
 	$sth->execute() or die $!;
 	my( $total ) = $sth->fetchrow_array;
 
+	my @fields = qw( activity_low activity_medium activity_high recordcount recordhistory );
+
 	$iar_dbh->do("LOCK TABLES `live` WRITE");
-	$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND (`field`='activity_low' OR `field`='activity_medium' OR `field`='activity_high' OR `field`='recordcount')");
-	$iar_dbh->do("INSERT INTO `live` (`id`,`field`,`value`) VALUES ($id,'activity_low',$low), ($id,'activity_medium',$medium), ($id,'activity_high',$high), ($id,'recordcount',$total)");
+	
+	$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND (" . join(' OR ', map { "`field`='$_'" } @fields ) . ")");
+	$iar_dbh->do("INSERT INTO `live` (`id`,`field`,`value`) VALUES ($id,'activity_low',$low), ($id,'activity_medium',$medium), ($id,'activity_high',$high), ($id,'recordcount',$total), ($id,'recordhistory','".join(',',@years)."')");
+	
+	$sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `id`=$id AND `field`='accession'");
+	$sth->execute or die $!;
+	my( $roar_accession ) = $sth->fetchrow_array;
+	if( defined($accession) and $accession < $roar_accession and $accession > 19900000000000 ) {
+		$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND `field`='accession'");
+		$iar_dbh->do("INSERT INTO `live` VALUES ($id,'accession',$accession)");
+	}
+	
 	$iar_dbh->do("UNLOCK TABLES");
 }
 
