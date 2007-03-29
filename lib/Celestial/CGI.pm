@@ -139,7 +139,7 @@ sub content_type {
 
 sub header {
 	my $self = shift;
-	$self->request->headers_out( @_ );
+	$self->request->headers_out->{$_[0]} = $_[1];
 }
 
 sub valid_email {

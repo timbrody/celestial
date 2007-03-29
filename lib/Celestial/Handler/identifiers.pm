@@ -314,9 +314,9 @@ sub page
 		
 		$CGI->content_type('text/csv');
 		$CGI->header( 'Content-disposition', 'attachment; filename=roar.csv' );
-		print "total,frequency\n";
+		print "daily,frequency\n";
 
-		foreach my $c (sort keys %COUNTS)
+		foreach my $c (sort { $a <=> $b } keys %COUNTS)
 		{
 			printf("\%d,\%d\n", $c, $COUNTS{$c});
 		}
