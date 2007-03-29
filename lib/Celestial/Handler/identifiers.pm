@@ -298,6 +298,46 @@ sub page
 
 		$self->chart_print($CGI, $chart);
 	}
+	elsif( $format eq 'histogram' )
+	{
+		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,COUNT(*) FROM `$table` AS R INNER JOIN `$sm_table` ON R.`id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d";
+		my $sth = $dbh->prepare($SQL);
+		$sth->execute(@values) or die $dbh->errstr;
+		
+		my %COUNTS;
+
+		# Build up the data for each set
+		while(my( $d, $c) = $sth->fetchrow_array)
+		{
+			$COUNTS{$c}++;
+		}
+		
+		$CGI->content_type('text/csv');
+		$CGI->header( 'Content-disposition', 'attachment; filename=roar.csv' );
+		print "total,frequency\n";
+
+		foreach my $c (sort keys %COUNTS)
+		{
+			printf("\%d,\%d\n", $c, $COUNTS{$c});
+		}
+	}
+	elsif( $format eq 'table' )
+	{
+		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,COUNT(*) FROM `$table` AS R INNER JOIN `$sm_table` ON R.`id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d";
+		my $sth = $dbh->prepare($SQL);
+		$sth->execute(@values) or die $dbh->errstr;
+		
+		my @DATA;
+
+		$CGI->content_type('text/plain');
+		print "date,total\n";
+
+		# Build up the data for each set
+		while(my( $d, $c) = $sth->fetchrow_array)
+		{
+			printf("\%d,\%d\n",$d,$c);
+		}
+	}
 	elsif( $format eq 'csv' )
 	{
 		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,`setName`,COUNT(*) FROM `$table` AS R INNER JOIN `$sm_table` ON R.`id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d,`set`";

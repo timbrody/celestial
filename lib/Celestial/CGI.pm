@@ -137,6 +137,11 @@ sub content_type {
 	$self->request->content_type( shift );
 }
 
+sub header {
+	my $self = shift;
+	$self->request->headers_out( @_ );
+}
+
 sub valid_email {
 	my( $self, $email ) = @_;
 	return $email =~ /^[A-Za-z0-9_\.\-]+\@(?:[A-Za-z0-9_\-]+\.)+[A-Za-z]{2,4}$/;
