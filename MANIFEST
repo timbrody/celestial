@@ -1,4 +1,5 @@
 bin/celestial
+bin/roar_update
 bin/celestial-report
 bin/record_histogram
 bin/test_exists
