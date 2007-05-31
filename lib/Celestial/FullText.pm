@@ -12,6 +12,7 @@ use HTTP::OAI::Metadata::METS;
 use vars qw( $MAX_FILE_SIZE );
 
 our $VERSION = '0.01';
+our $DEBUG = 0;
 
 our %SERVER_TYPES = (
 	eprints => "GNU EPrints",
@@ -110,7 +111,7 @@ sub server_type
 		my $ct = $r->content;
 		if( $ct =~ /\"metadataFieldLabel\"/ and $ct =~ /\"metadataFieldValue\"/ )
 		{
-			$self->{ jumpoff } = $url;
+#			$self->{ jumpoff } = $url;
 			return $self->{ server_type } = "dspace";
 		}
 	}
@@ -123,16 +124,13 @@ sub _dspace
 	my $self = shift;
 	my $ha = $self->{ ha };
 	my $rec = $self->{ record };
-	my $jo = $self->{ jumpoff };
 	my @fmts;
-	unless( $self->{ jumpoff } )
-	{
-		($jo) = @{$rec->metadata->dc->{ identifier }};
-	}
-	$jo = $ha->get( $jo );
+	my( $jo_url ) = grep { /^https?:\/\// } @{$rec->metadata->dc->{ identifier }};
+warn "GET $jo_url\n" if $DEBUG;
+	my $jo = $ha->get( $jo_url );
 	unless( $jo->is_success ) {
 		warn sprintf("Error requesting [%s]: %s\n",
-			$jo->request->uri,
+			$jo_url,
 			$jo->message,
 		);
 		return ();
@@ -141,13 +139,20 @@ sub _dspace
 	my $bu = $jo->request->uri;
 	$bu->path('');
 
+	my %urls;
+
 	while( $ct =~ m/\"([^\"]+?bitstream[^\"]+?)\"/sg )
 	{
 		my $uri = URI->new_abs( $1, $bu );
+		$urls{$uri} = $uri;
+	}
+
+	while(my( $u, $uri ) = each %urls )
+	{
 		if( my $fmt = Celestial::FullText::Format->new( $ha, $uri ) ) {
 			push @fmts, $fmt;
 		} else {
-			warn sprintf("Error requesting [%s], ignoring!\n", $uri);
+			warn sprintf("Error requesting [%s], ignored\n", $uri);
 		}
 	}
 
@@ -209,6 +214,7 @@ our $TMPFILE_SIZE = 0;
 sub new
 {
 	my( $class, $ua, $url ) = @_;
+warn "HEAD $url\n" if $DEBUG;
 	my $r = $ua->head( $url );
 	unless( $r->is_success ) {
 		warn "Error requesting [$url]: " . $r->message . "\n";
@@ -242,6 +248,7 @@ sub _get
 	$self->{ fh } = $TMPFILE = File::Temp->new( CLEANUP => 1, SUFFIX => $ext );
 	binmode($TMPFILE);
 	$TMPFILE_SIZE = 0;
+warn "GET ".$self->url."\n" if $DEBUG;
 	return $self->{ ha }->get( $self->url, ':content_cb' => \&Celestial::FullText::Format::_lwpcallback );
 }
 

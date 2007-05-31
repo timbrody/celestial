@@ -69,7 +69,7 @@ binmode(STDOUT,":utf8");
 
 use POSIX qw/:sys_wait_h strftime/;
 
-use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $JAVA $DROID $DROID_SIG $MAX_FILE_SIZE);
+use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $GRANULARITY $JAVA $DROID $DROID_SIG $MAX_FILE_SIZE);
 
 $VERSION = '3.02';
 $HTTP_TIMEOUT = 300; # In seconds
@@ -103,7 +103,9 @@ use constant {
 #$HTTP::OAI::Response::USE_EVAL = 0;
 
 our $opt_verbose;
-my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun );
+our $opt_identifier;
+our $opt_missing;
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun );
 $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
@@ -119,6 +121,7 @@ GetOptions(
 	'identifier=s' => \$opt_identifier,
 	'force' => \$opt_force,
 	'fulltext!' => \$opt_fulltext,
+	'missing' => \$opt_missing,
 	'dryrun' => \$opt_dryrun,
 ) or pod2usage("Invalid argument");
 
@@ -193,6 +196,7 @@ foreach my $repo (@REPOS) {
 		print "Updating repository " . $repo->identifier ."\n" if $opt_verbose;
 		update_repository($dbh,
 			repository=>$repo,
+			identifier=>$opt_identifier,
 			adminEmail=>$ADMINEMAIL
 		);
 		print "Finished updating repository " . $repo->identifier . "\n" if $opt_verbose;
@@ -252,6 +256,7 @@ sub update_repository {
 	my $dbh = shift;
 	my %args = @_;
 	my $repo = $args{repository};
+	my $identifier = $args{identifier};
 	my $adminEmail = $args{adminEmail} || '';
 	my $startTime = $dbh->now();
 
@@ -366,6 +371,7 @@ sub update_repository {
 		my $st = harvest_Fulltext( $dbh,
 			harvestAgent => $ha,
 			repository => $repo,
+			identifier => $identifier,
 			from => $ftt->lastHarvest
 		);
 		if( $st ) {
@@ -532,7 +538,7 @@ sub harvest_Fulltext
 {
 	return unless $opt_fulltext;
 	my( $dbh, %args ) = @_;
-	my( $ha, $repo, $from ) = @args{qw( harvestAgent repository from )};
+	my( $ha, $repo, $from, $identifier ) = @args{qw( harvestAgent repository from identifier )};
 
 	my $mets;
 	for($repo->listMetadataFormats())
@@ -549,16 +555,26 @@ sub harvest_Fulltext
 	my $ftt = $mdf->getFulltext();
 
 	my $sth;
-	if( $from ) {
+	if( defined($identifier) ) {
+		warn "Updating full-text record for [$identifier]\n" if $opt_verbose;
+		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." WHERE `identifier`=?");
+		$sth->execute( $identifier ) or die $!;
+	} elsif( $from ) {
 		warn "Updating full-text records since $from\n" if $opt_verbose;
-		$sth = $dbh->prepare("SELECT id FROM ".$mdf->table." WHERE datestamp>?");
+		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." WHERE `datestamp`>? ORDER BY RAND()");
 		$sth->execute($from) or die $!;
 	} else {
-		$sth = $dbh->prepare("SELECT id FROM ".$mdf->table);
+		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." ORDER BY RAND()");
 		$sth->execute or die $!;
 	}
 	my $st;
 	while( my ($id) = $sth->fetchrow_array ) {
+		# Skip if the record already has some full-texts recorded
+		if( $opt_missing and $ftt->hasFulltext( $id ) )
+		{
+			next;
+		}
+		
 		$ftt->removeFulltext( $id );
 
 		my $rec = $mets ?
@@ -586,6 +602,7 @@ sub harvest_Fulltext
 			$rec->metadata( $dc );
 		}
 		$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
+		$Celestial::FullText::DEBUG = $opt_verbose;
 		my $ft = Celestial::FullText->new(
 			$ha,
 			server_type => $st,
