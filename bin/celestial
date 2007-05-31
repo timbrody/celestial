@@ -543,7 +543,7 @@ sub harvest_Fulltext
 	my $mets;
 	for($repo->listMetadataFormats())
 	{
-		if( $_->metadataNamespace eq 'http://www.loc.gov/METS/' )
+		if( defined $_->metadataNamespace and $_->metadataNamespace eq 'http://www.loc.gov/METS/' )
 		{
 			$mets = $_;
 			last;
