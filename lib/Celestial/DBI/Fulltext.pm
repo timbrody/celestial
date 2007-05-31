@@ -25,7 +25,7 @@ $TABLE_SCHEMA = "
 `mimetype` VARCHAR(64) NOT NULL,
 `puid` VARCHAR(64),
 `format` VARCHAR(255) NOT NULL,
-PRIMARY KEY(`record`,`url`,`format`)
+PRIMARY KEY(`record`,`format`,`url`)
 )
 ";
 
@@ -73,6 +73,15 @@ sub addFulltext {
 	$dbh->do("REPLACE ".$self->table." (".join(',',@fields).") VALUES(".join(',',map{'?'}@fields).")",{},
 		@$rec{@fields})
 		or die "Error writing to ".$self->table.": $!";
+}
+
+sub hasFulltext {
+	my( $self, $id ) = @_;
+	my $dbh = $self->dbh;
+
+	my $sth = $dbh->prepare("SELECT 1 FROM ".$self->table." WHERE `record`=$id LIMIT 1");
+	$sth->execute or die $!;
+	return $sth->fetch;
 }
 
 sub removeFulltext {
