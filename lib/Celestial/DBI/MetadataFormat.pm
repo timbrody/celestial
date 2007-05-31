@@ -176,6 +176,11 @@ sub getRecordId {
 	$self->dbh->getRecordId($self,shift);
 }
 
+sub getRecordIdentifier {
+	my $self = shift;
+	$self->dbh->getRecordIdentifier($self,shift);
+}
+
 sub getRecordAccession {
 	my $self = shift;
 	$self->dbh->getRecordAccession($self,shift);

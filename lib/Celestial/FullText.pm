@@ -195,8 +195,12 @@ sub _mets
 	my @urls;
 	for($rec->metadata->files)
 	{
-warn "Got url: " . $_->{ url };
 		push @urls, $_->{ url } if $_->{ url };
+	}
+
+	unless( @urls )
+	{
+		warn $rec->identifier . " - METS - didn't contain any URLs";
 	}
 
 	return grep { defined $_ } map { Celestial::FullText::Format->new( $ha, $_ ) } @urls;

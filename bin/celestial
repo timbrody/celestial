@@ -568,7 +568,8 @@ sub harvest_Fulltext
 		$sth->execute or die $!;
 	}
 	my $st;
-	while( my ($id) = $sth->fetchrow_array ) {
+	while( my ($id) = $sth->fetchrow_array )
+	{
 		# Skip if the record already has some full-texts recorded
 		if( $opt_missing and $ftt->hasFulltext( $id ) )
 		{
@@ -578,29 +579,19 @@ sub harvest_Fulltext
 		$ftt->removeFulltext( $id );
 
 		my $rec = $mets ?
-			$mets->getRecord( $id ) :
-			$mdf->getRecord( $id );
+			getMetsRecord( $mets, $id ) :
+			getDcRecord( $mdf, $id );
 
-		next if $rec->header->is_deleted;
-		warn sprintf("Searching for full-text for %s\n", $rec->identifier) if $opt_verbose;
+		warn sprintf("No METS record for %s\n", $mdf->getRecordIdentifier( $id ))
+			if $mets and not $rec;
 
-		unless( $rec->metadata ) {
-			warn sprintf("%s doesn't contain any metadata\n", $rec->identifier);
-			next;
-		}
+		$rec ||= getDcRecord( $mdf, $id );
 
-		if( $mets )
-		{
-			$rec->metadata( HTTP::OAI::Metadata::METS->new( dom => $rec->metadata->dom ));
-		} else {
-			my $dc = HTTP::OAI::Metadata::OAI_DC->new();
-			$rec->metadata->set_handler(
-				HTTP::OAI::SAXHandler->new( # Required to supply Text
-					Handler => $dc
-			));
-			$rec->metadata->generate;
-			$rec->metadata( $dc );
-		}
+		next unless $rec;
+
+		warn sprintf("Searching for full-text for %s\n", $rec->identifier)
+			if $opt_verbose;
+
 		$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
 		$Celestial::FullText::DEBUG = $opt_verbose;
 		my $ft = Celestial::FullText->new(
@@ -654,6 +645,44 @@ sub harvest_Fulltext
 	}
 	$sth->finish;
 	return $st;
+}
+
+sub getDcRecord
+{
+	my( $mdf, $id ) = @_;
+
+	my $rec = $mdf->getRecord( $id ) or return;
+
+	return if $rec->header->is_deleted;
+
+	if( not $rec->metadata )
+	{
+		warn sprintf("%s doesn't contain any metadata\n", $rec->identifier);
+		return;
+	}
+
+	my $dc = HTTP::OAI::Metadata::OAI_DC->new();
+	$rec->metadata->set_handler(
+			HTTP::OAI::SAXHandler->new( # Required to supply Text
+				Handler => $dc
+				));
+	$rec->metadata->generate;
+	$rec->metadata( $dc );
+
+	return $rec;
+}
+
+sub getMetsRecord
+{
+	my( $mdf, $id ) = @_;
+
+	my $rec = $mdf->getRecord( $id ) or return;
+	
+	return if $rec->header->is_deleted or not $rec->metadata;
+
+	$rec->metadata( HTTP::OAI::Metadata::METS->new( dom => $rec->metadata->dom ));
+
+	return $rec;
 }
 
 # If the record already has the setSpec, return 0, otherwise add the setSpec and return 1

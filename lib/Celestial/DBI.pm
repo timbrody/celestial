@@ -405,6 +405,22 @@ sub getRecordIds {
 	return @ids;
 }
 
+=item $identifier = $dbh->getRecordIdentifier( $mdf, $id )
+
+Return the identifier for $id, or undef if it doesn't exist.
+
+=cut
+
+sub getRecordIdentifier
+{
+	my( $dbh, $mdf, $id ) = @_;
+
+	my $sth = $dbh->prepare("SELECT `identifier` FROM ".$mdf->table." WHERE id=$id");
+	$sth->execute;
+	my( $identifier ) = $sth->fetchrow_array;
+	return $identifier;
+}
+
 =item $repo = $dbh->getRepository($id)
 
 Get a new repository object using its id.
