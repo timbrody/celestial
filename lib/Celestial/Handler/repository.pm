@@ -21,13 +21,14 @@ sub body {
 	my $dom = $self->dom;
 
 	my $repoid = $CGI->param( 'repository' );
+	my $baseurl;
 	return $self->error( $CGI, $CGI->msg( 'error.norepository' )) unless defined($repoid);
 	if( $repoid =~ /\D/ )
 	{
 		$repoid = $dbh->getRepositoryBaseURL($repoid);
 	}
 	my $repo = $dbh->getRepository( $repoid );
-	return $self->error( $CGI, $CGI->msg( 'error.nosuchrepository', $repoid )) unless defined($repo);
+	return $self->error( $CGI, $CGI->msg( 'error.nosuchrepository', $CGI->param( 'repository' ))) unless defined($repo);
 
 	# We need to do this first, to generate the nosuchrepository error
 	if( $CGI->authorised and
