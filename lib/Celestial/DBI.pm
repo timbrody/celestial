@@ -72,11 +72,12 @@ use HTTP::OAI::Set;
 
 use Carp;
 
-use vars qw($AUTOLOAD $errstr $DB_MAX_ERROR_SIZE $DATE_FORMAT);
+use vars qw($AUTOLOAD $errstr );
 
-$DB_MAX_ERROR_SIZE = 2**15; # 32k
+our $DB_MAX_ERROR_SIZE = 2**15; # 32k
+our $DB_MAX_FIELD_SIZE = 1 * 1024 * 1024; # 1MB of XML ...
 
-$DATE_FORMAT = '%Y%m%d%H%i%S';
+our $DATE_FORMAT = '%Y%m%d%H%i%S';
 
 =pod
 
@@ -830,7 +831,7 @@ sub listErrors($$)
 sub addRecord($$$) {
 	my( $self, $mdf, $rec ) = @_;
 	$self->addProvenance($mdf, $rec);
-	$self->updateRecord($mdf, $rec);
+	return $self->updateRecord($mdf, $rec);
 }
 
 sub addProvenance($$$) {
@@ -881,6 +882,16 @@ sub updateMetadata
 				$node
 			} $rec->about );
 		$ab = $dom->toString;
+	}
+
+	if(
+		length($hd) > $DB_MAX_FIELD_SIZE or
+		length($md) > $DB_MAX_FIELD_SIZE or
+		length($ab) > $DB_MAX_FIELD_SIZE
+		)
+	{
+		warn $repo->id . " " . $rec->identifier . " is larger than max allowed size ($DB_MAX_FIELD_SIZE)\n";
+		return undef;
 	}
 
 	my( $id, $accession );

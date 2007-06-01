@@ -1,3 +1,44 @@
+=head1 NAME
+
+Celestial::FullText - Retrieve the full-text for an OAI record
+
+=head1 SYNOPSIS
+
+  use Celestial::FullText;
+
+  my $ft = Celestial::FullText->new( $ha, identifier => $id );
+  my $ft = Celestial::FullText->new( $ha, record => $rec );
+
+	my $ft = Celestial::FullText->new(
+		$ha,
+		record => $rec
+	);
+
+  unless( $ft )
+  {
+  	warn "Unsupported repository type";
+  }
+
+  foreach my $file ($ft->formats)
+  {
+		my $mt = $file->mime_type;
+		my @ext = $mt->extensions;
+		my $url = $file->url;
+		print -s $file;
+  }
+
+=head1 DESCRIPTION
+
+=head2 EXPORT
+
+None by default.
+
+=head1 METHODS
+
+=over 4
+
+=cut
+
 package Celestial::FullText;
 
 use strict;
@@ -22,61 +63,40 @@ our %SERVER_TYPES = (
 
 # Preloaded methods go here.
 
+=item $ft = Celestial::FullText->new HARVEST_AGENT, RECORD
+
+Create a new FullText retrieval object using RECORD to determine what the type of repository is.
+
+=cut
+
 sub new
 {
-	my( $class, $ha, %opts ) = @_;
-	unless( $opts{ identifier } || $opts{ record } )
-	{
-		croak("Requires identifier or record arguments");
-	}
-	unless( $opts{ record } )
-	{
-		my $r = $ha->GetRecord(
-			identifier => $opts{ identifier },
-			metadataPrefix => 'oai_dc',
-			handlers => { metadata => 'HTTP::OAI::Metadata::OAI_DC' }
-		);
-		$opts{ record } = $r->next;
-		unless( $r->is_success )
-		{
-			warn "Error getting record ($opts{identifier}): " . $r->message;
-			return;
-		}
-	}
-	unless( $opts{ record } )
-	{
-		warn("Failed to get oai_dc record for $opts{identifier}");
-		return;
-	}
-	unless( $opts{ record }->metadata )
-	{
-		warn("Record doesn't contain metadata (".$opts{record}->identifier."): $opts{record}");
-		return;
-	}
-	bless {%opts, ha => $ha}, $class;
+	my( $class, $ha, $rec ) = @_;
+
+	Carp::confess("Required record argument undefined")
+		unless( $rec );
+	Carp::confess("Record doesn't contain metadata")
+		unless( $rec->metadata );
+
+	my %self;
+	$self{ server_type } = guess_repository_type( $ha, $rec )
+		or return undef;
+
+	return bless {%self, ha => $ha}, $class;
 }
 
-sub formats
+=item $st = Celestial::FullText::guess_repository_type HARVEST_AGENT, RECORD
+
+Guess the repository type using HARVEST_AGENT and RECORD.
+
+=cut
+
+sub guess_repository_type
 {
-	my $self = shift;
-	my $st = $self->server_type or return ();
-
-	my $f = "_$st";
-	no strict "refs";
-	return $self->$f();
-}
-
-sub server_type
-{
-	my $self = shift;
-	return $self->{ server_type } if $self->{ server_type };
-	my $ha = $self->{ ha };
-	my $rec = $self->{ record };
-
-	if( $rec->metadata->isa( 'HTTP::OAI::Metadata::METS' ))
-	{
-		return $self->{ server_type } = "mets";
-	}
+	my( $ha, $rec ) = @_;
+	
+	Carp::confess( "Requires a record containing HTTP::OAI::Metadata::OAI_DC metadata" )
+		unless( $rec->metadata->isa( 'HTTP::OAI::Metadata::OAI_DC' ) );
 
 	my $ids = $rec->metadata->dc->{ identifier };
 
@@ -84,7 +104,7 @@ sub server_type
 		my $uri = URI->new($ha->baseURL);
 		if( $uri->path eq '/perl/oai2' )
 		{
-			return $self->{ server_type } = "eprints";
+			return "eprints";
 		}
 	}
 
@@ -111,19 +131,40 @@ sub server_type
 		my $ct = $r->content;
 		if( $ct =~ /\"metadataFieldLabel\"/ and $ct =~ /\"metadataFieldValue\"/ )
 		{
-#			$self->{ jumpoff } = $url;
-			return $self->{ server_type } = "dspace";
+			return "dspace";
 		}
 	}
 
 	return;
 }
 
+=item @formats = $ft->formats RECORD
+
+Return a list of formats for the given record.
+
+=cut
+
+sub formats
+{
+	my( $self, $rec ) = @_;
+
+	my $st = $self->{ server_type };
+
+	# If we've been handed a METS record, use it
+	if( $rec->metadata->isa( 'HTTP::OAI::Metadata::METS' ))
+	{
+		$st = "mets";
+	}
+
+	my $f = "_$st";
+	no strict "refs";
+	return $self->$f($rec);
+}
+
 sub _dspace
 {
-	my $self = shift;
+	my( $self, $rec ) = @_;
 	my $ha = $self->{ ha };
-	my $rec = $self->{ record };
 	my @fmts;
 	my( $jo_url ) = grep { /^https?:\/\// } @{$rec->metadata->dc->{ identifier }};
 warn "GET $jo_url\n" if $DEBUG;
@@ -161,9 +202,8 @@ warn "GET $jo_url\n" if $DEBUG;
 
 sub _eprints
 {
-	my $self = shift;
+	my( $self, $rec ) = @_;
 	my $ha = $self->{ ha };
-	my $rec = $self->{ record };
 	my @fmts;
 	my @urls;
 	push @urls, @{$rec->metadata->dc->{ identifier }};
@@ -185,9 +225,8 @@ sub _eprints
 
 sub _mets
 {
-	my $self = shift;
+	my( $self, $rec ) = @_;
 	my $ha = $self->{ ha };
-	my $rec = $self->{ record };
 
 	my $bu = URI->new($ha->baseURL)->canonical;
 	$bu->path('');
@@ -319,65 +358,12 @@ sub file
 }
 
 1;
+
 __END__
-# Below is stub documentation for your module. You'd better edit it!
 
-=head1 NAME
-
-Celestial::FullText - Retrieve the full-text for an OAI record
-
-=head1 SYNOPSIS
-
-  use Celestial::FullText;
-
-  my $ft = Celestial::FullText->new( $ha, identifier => $id );
-  my $ft = Celestial::FullText->new( $ha, record => $rec );
-
-	my $ft = Celestial::FullText->new(
-		$ha,
-		server_type => 'dspace',
-		record => $rec
-	);
-
-  unless( $ft )
-  {
-  	warn "Unsupported repository type";
-  }
-
-  print $ft->server_type;
-
-  foreach my $file ($ft->formats)
-  {
-		my $mt = $file->mime_type;
-		my @ext = $mt->extensions;
-		my $url = $file->url;
-		print -s $file;
-  }
-
-=head1 DESCRIPTION
-
-Stub documentation for Celestial::FullText, created by h2xs. It looks like the
-author of the extension was negligent enough to leave the stub
-unedited.
-
-Blah blah blah.
-
-=head2 EXPORT
-
-None by default.
-
-
+=back
 
 =head1 SEE ALSO
-
-Mention other useful documentation such as the documentation of
-related modules or operating system documentation (such as man pages
-in UNIX), or any relevant external documentation such as RFCs or
-standards.
-
-If you have a mailing list set up for your module, mention it here.
-
-If you have a web site set up for your module, mention it here.
 
 =head1 AUTHOR
 
@@ -390,6 +376,5 @@ Copyright (C) 2006 by Timothy D Brody
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.5 or,
 at your option, any later version of Perl 5 you may have available.
-
 
 =cut

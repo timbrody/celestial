@@ -368,13 +368,13 @@ sub update_repository {
 		my $ftt = $oai_dc->getFulltext();
 		my $startTime = $dbh->now();
 		$ftt->synchronize($oai_dc); # Remove orphaned records
-		my $st = harvest_Fulltext( $dbh,
+		my $ok = harvest_Fulltext( $dbh,
 			harvestAgent => $ha,
 			repository => $repo,
 			identifier => $identifier,
 			from => $ftt->lastHarvest
 		);
-		if( $st ) {
+		if( $ok ) {
 			$ftt->lastHarvest( $startTime );
 		}
 	}
@@ -445,6 +445,7 @@ sub harvest_GetRecord {
 			);
 		}
 		my $rec = $r->next || return (undef,undef,undef);
+		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
 		$mdf->addRecord($rec);
 
 		return (undef,undef,undef);
@@ -463,9 +464,8 @@ sub harvest_GetRecord {
 			next;
 		}
 		$rec = $rec->next || next;
-		if( $mdf->addRecord($rec) ) {
-#			print STDERR "(" . $repo->identifier . "/" . $mdf->metadataPrefix .") GetRecord: Added " . $rec->identifier . "\n";
-		}
+		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
+		$mdf->addRecord($rec);
 # Add a small delay so we don't overrun the repository
 		select(undef,undef,undef,0.25);
 	}
@@ -540,6 +540,8 @@ sub harvest_Fulltext
 	my( $dbh, %args ) = @_;
 	my( $ha, $repo, $from, $identifier ) = @args{qw( harvestAgent repository from identifier )};
 
+	my $mdf = $repo->getMetadataFormat( 'oai_dc' ) or return;
+
 	my $mets;
 	for($repo->listMetadataFormats())
 	{
@@ -550,10 +552,14 @@ sub harvest_Fulltext
 		}
 	}
 
-	my $mdf = $repo->getMetadataFormat( 'oai_dc' ) or return;
-
 	my $ftt = $mdf->getFulltext();
 
+	# Full text object requires a record to initialize, so this is delayed
+	my $ft;
+
+	$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
+	$Celestial::FullText::DEBUG = $opt_verbose;
+		
 	my $sth;
 	if( defined($identifier) ) {
 		warn "Updating full-text record for [$identifier]\n" if $opt_verbose;
@@ -567,48 +573,42 @@ sub harvest_Fulltext
 		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." ORDER BY RAND()");
 		$sth->execute or die $!;
 	}
-	my $st;
+
 	while( my ($id) = $sth->fetchrow_array )
 	{
 		# Skip if the record already has some full-texts recorded
-		if( $opt_missing and $ftt->hasFulltext( $id ) )
-		{
-			next;
-		}
+		next if $opt_missing and $ftt->hasFulltext( $id );
 		
+		# Remove existing formats for this record
 		$ftt->removeFulltext( $id );
 
-		my $rec = $mets ?
-			getMetsRecord( $mets, $id ) :
-			getDcRecord( $mdf, $id );
-
+		my $rec = getDcRecord( $mdf, $id ) or next;
+		my $mets_record = $mets ? getMetsRecord( $mets, $id ) : undef;
+		
 		warn sprintf("No METS record for %s\n", $mdf->getRecordIdentifier( $id ))
-			if $mets and not $rec;
-
-		$rec ||= getDcRecord( $mdf, $id );
-
-		next unless $rec;
+			if $mets and not $mets_record;
 
 		warn sprintf("Searching for full-text for %s\n", $rec->identifier)
 			if $opt_verbose;
 
-		$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
-		$Celestial::FullText::DEBUG = $opt_verbose;
-		my $ft = Celestial::FullText->new(
-			$ha,
-			server_type => $st,
-			record => $rec
-		);
-		unless( $st )
+		# We need to initialize the fulltext object
+		if( !$ft )
 		{
-			$st = $ft->server_type;
-			unless( $st ) {
-				warn "Can't harvest full-text from ".$repo->identifier.": repository type unsupported\n" if $opt_verbose;
+			$ft = Celestial::FullText->new(
+				$ha,
+				$rec
+			);
+
+			unless( $ft )
+			{
+				warn "Can't harvest full-text from ".$repo->identifier.": repository type unknown or unsupported\n" if $opt_verbose;
 				last;
 			}
 		}
 
-		foreach my $fmt ($ft->formats)
+		my @formats = $ft->formats( $mets_record || $rec );
+
+		foreach my $fmt ( @formats )
 		{
 			my $ds = $rec->datestamp;
 			if( $fmt->date )
@@ -644,7 +644,8 @@ sub harvest_Fulltext
 		sleep(rand(5)); # Pause for at least a few seconds between records
 	}
 	$sth->finish;
-	return $st;
+
+	return $ft;
 }
 
 sub getDcRecord
