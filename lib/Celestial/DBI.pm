@@ -75,7 +75,7 @@ use Carp;
 use vars qw($AUTOLOAD $errstr );
 
 our $DB_MAX_ERROR_SIZE = 2**15; # 32k
-our $DB_MAX_FIELD_SIZE = 1 * 1024 * 1024; # 1MB of XML ...
+our $DB_MAX_FIELD_SIZE = .5 * 1024 * 1024; # 512k of XML ...
 
 our $DATE_FORMAT = '%Y%m%d%H%i%S';
 
