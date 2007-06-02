@@ -67,8 +67,7 @@ use XML::LibXML;
 use Encode;
 use Net::SMTP;
 
-use HTTP::OAI::Record;
-use HTTP::OAI::Set;
+use HTTP::OAI;
 
 use Carp;
 
