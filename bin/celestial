@@ -348,6 +348,7 @@ sub update_repository {
 				$dbh->lastToken( $mdf, $args{ resumptionToken });
 			}
 		} elsif( !$opt_dryrun and !defined($opt_identifier) ) {
+			$dbh->lastToken($mdf,undef);
 			$dbh->lastHarvest($mdf,$startTime);
 		}
 	}
@@ -565,7 +566,7 @@ sub harvest_Fulltext
 		warn "Updating full-text record for [$identifier]\n" if $opt_verbose;
 		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." WHERE `identifier`=?");
 		$sth->execute( $identifier ) or die $!;
-	} elsif( $from ) {
+	} elsif( $from and not $opt_missing ) {
 		warn "Updating full-text records since $from\n" if $opt_verbose;
 		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." WHERE `datestamp`>? ORDER BY RAND()");
 		$sth->execute($from) or die $!;
