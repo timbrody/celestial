@@ -51,6 +51,14 @@ Disable full-text downloads and format identification.
 
 Harvest only the repository given (use B<--list> to get a list of identifiers).
 
+=item B<--missing>
+
+Only attempt to get fulltexts where there is no record of one existing.
+
+=item B<--allfulltext>
+
+Attempt to get fulltexts for all records, not just since the last time we did a fulltext harvest.
+
 =item B<--verbose>
 
 Be more verbose.
@@ -105,7 +113,7 @@ use constant {
 our $opt_verbose;
 our $opt_identifier;
 our $opt_missing;
-my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun );
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun, $opt_allfulltext );
 $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
@@ -123,6 +131,7 @@ GetOptions(
 	'fulltext!' => \$opt_fulltext,
 	'missing' => \$opt_missing,
 	'dryrun' => \$opt_dryrun,
+	'allfulltext' => \$opt_allfulltext,
 ) or pod2usage("Invalid argument");
 
 pod2usage(1) if $opt_help;
@@ -566,7 +575,7 @@ sub harvest_Fulltext
 		warn "Updating full-text record for [$identifier]\n" if $opt_verbose;
 		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." WHERE `identifier`=?");
 		$sth->execute( $identifier ) or die $!;
-	} elsif( $from and not $opt_missing ) {
+	} elsif( $from and not $opt_allfulltext ) {
 		warn "Updating full-text records since $from\n" if $opt_verbose;
 		$sth = $dbh->prepare("SELECT `id` FROM ".$mdf->table." WHERE `datestamp`>? ORDER BY RAND()");
 		$sth->execute($from) or die $!;
