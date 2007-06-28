@@ -17,14 +17,14 @@ use HTTP::OAI::Harvester;
 use XML::LibXML;
 use Celestial::DBI;
 
-use Apache2;
+use mod_perl;
 use APR::Table;
-use Apache::RequestIO; # Supplies $r->read
-use Apache::Connection;
-use Apache::RequestRec;
-#use Apache::Access;
-use Apache::Const qw( OK );
-#use Apache::Filter;
+use Apache2::RequestIO; # Supplies $r->read
+use Apache2::Connection;
+use Apache2::RequestRec;
+#use Apache2::Access;
+use Apache2::Const qw( OK );
+#use Apache2::Filter;
 
 #$SIG{__DIE__} = sub {
 #	print CGI::header( 'text/html' );
@@ -171,8 +171,8 @@ use strict;
 use warnings;
 
 use CGI qw();
-use Apache2;
-use Apache::RequestIO;
+use mod_perl;
+use Apache2::RequestIO;
 use HTML::Entities;
 
 sub handler

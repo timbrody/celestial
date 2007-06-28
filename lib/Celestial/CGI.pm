@@ -7,7 +7,7 @@ use Celestial::Config; # Exports $SETTINGS
 
 use YAML;
 use vars qw( $AUTOLOAD );
-use Apache::Const qw( REDIRECT NOT_FOUND SERVER_ERROR );
+use Apache2::Const qw( REDIRECT NOT_FOUND SERVER_ERROR );
 use URI;
 use URI::Escape qw();
 use Number::Bytes::Human qw();
