@@ -84,8 +84,8 @@ $HTTP_TIMEOUT = 300; # In seconds
 $MAX_FILE_SIZE = 1024*1024*10; # 10MB
 
 $JAVA = '/usr/java/jdk1.5.0_06/bin/java';
-$DROID = '/home/devel/share/DROID/DROID.jar';
-$DROID_SIG = '/home/devel/share/DROID/DROID_SignatureFile.xml';
+$DROID = '/home/celestial/share/DROID/DROID.jar';
+$DROID_SIG = '/home/celestial/share/DROID/DROID_SignatureFile.xml';
 
 use Getopt::Long;
 use Pod::Usage;

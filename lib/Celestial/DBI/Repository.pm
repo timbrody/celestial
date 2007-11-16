@@ -32,10 +32,10 @@ use vars qw(@ISA @COLUMNS %SETS_SCHEMA $MDF_SCHEMA );
 $SETS_SCHEMA{'Sets'} = <<EOS;
 (
 `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-`setSpec` TINYTEXT NOT NULL,
+`setSpec` TEXT NOT NULL,
 `setName` TEXT,
-PRIMARY KEY(`setSpec`(255)),
-UNIQUE(`id`)
+KEY(`setSpec`(255)),
+PRIMARY KEY(`id`)
 )
 EOS
 $SETS_SCHEMA{'SetDescriptions'} = <<EOS;
@@ -193,21 +193,21 @@ sub addSet($$) {
 	my $tblname = $self->sets_table;
 
 	my $sth = $dbh->prepare("SELECT `id` FROM $tblname WHERE `setSpec`=?");
-	$sth->execute($set->setSpec) or Carp::confess( "Error adding set: $!" );
+	$sth->execute($set->setSpec) or Carp::confess( "Error adding set: " . $sth->{Statement} );
 	($id) = $sth->fetchrow_array;
 	$sth->finish;
 
 	if( defined($id) ) {
 		$sth = $dbh->prepare("UPDATE $tblname SET `setName`=? WHERE `id`=?");
 		$sth->execute($set->setName, $id)
-			or Carp::confess( "Error updating set: $!" );
+			or Carp::confess( "Error updating set: " . $sth->{Statement} );
 	} else {
 		$sth = $dbh->prepare("INSERT $tblname (`setSpec`,`setName`) VALUES (?,?)");
 		$sth->execute($set->setSpec,$set->setName)
-			or Carp::confess( "Error adding set: $!" );
+			or Carp::confess( "Error adding set: " . $sth->{Statement} . " (".join(',',$set->setSpec,$set->setName).")" );
 		$id = $sth->{mysql_insertid};
 		unless( defined($id) ) {
-			Carp::confess( "Error getting id for new set: $!" );
+			Carp::confess( "Error getting id for new set: " . $sth->{Statement} );
 		}
 	}
 	$sth->finish;
