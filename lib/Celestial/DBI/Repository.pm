@@ -121,11 +121,13 @@ sub remove
 }
 
 sub lock {
-	shift->dbh->lock(@_);
+	my( $self ) = @_;
+	$self->dbh->lock($self->id);
 }
 
 sub unlock {
-	shift->dbh->unlock(@_);
+	my( $self ) = @_;
+	$self->dbh->unlock($self->id);
 }
 
 sub getLock {
