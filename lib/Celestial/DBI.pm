@@ -227,9 +227,9 @@ sub AUTOLOAD {
 
 =pod
 
-=item $dbh->lock($repo_id)
+=item $dbh->lock( $repo_id [, $timestamp] )
 
-Attempt to lock a repository $repo_id, returns 1 on success or undef on failure (already locked).
+Attempt to lock a repository $repo_id optionally using $timestamp, returns 1 on success or undef on failure (already locked).
 
 =cut
 
