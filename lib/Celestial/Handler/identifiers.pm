@@ -1723,7 +1723,7 @@ sub period_diff
 		}
 		else
 		{
-			$u = timegm(0,0,0,1,substr($u,4,2)+1,substr($u,0,4));
+			$u = timegm(0,0,0,1,substr($u,4,2),substr($u,0,4));
 			$u -= 86400;
 			my @t = gmtime($u);
 			$u = sprintf("%d%02d%02d",$t[5]+1900,$t[4]+1,$t[3]);
@@ -1735,8 +1735,8 @@ sub period_diff
 sub date_diff
 {
 	my( $f, $u ) = @_;
-	$f = timegm(0,0,0,substr($f,6,2),substr($f,4,2),substr($f,0,4));
-	$u = timegm(0,0,0,substr($u,6,2),substr($u,4,2),substr($u,0,4));
+	$f = timegm(0,0,0,substr($f,6,2),substr($f,4,2)-1,substr($f,0,4));
+	$u = timegm(0,0,0,substr($u,6,2),substr($u,4,2)-1,substr($u,0,4));
 	return ($u - $f) / 86400;
 }
 
