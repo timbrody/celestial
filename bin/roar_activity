@@ -1,0 +1,265 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+B<roar_update> - update ROAR record counts from Celestial
+
+=head1 SYNOPSIS
+
+B<roar_update> [B<options>]
+
+=head1 DESCRIPTION
+
+This script updates ROAR's record counts using the Celestial database.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>
+
+Show this page.
+
+=item B<--list>
+
+List all configured repositories.
+
+=item B<--repository>
+
+Harvest only the repository given (use B<--list> to get a list of identifiers).
+
+=item B<--accession>
+
+Set accession dates using OAI data.
+
+=item B<--verbose>
+
+Be more verbose.
+
+=back
+
+=cut
+
+use Carp;
+
+use strict;
+use warnings;
+use encoding 'utf8';
+
+binmode(STDOUT,":utf8");
+
+use POSIX qw/:sys_wait_h strftime/;
+
+use vars qw($VERSION $MAX_HARVESTERS $ADMINEMAIL $HTTP_TIMEOUT $DEBUG $opt_identifier $GRANULARITY $JAVA $DROID $DROID_SIG $MAX_FILE_SIZE);
+
+$VERSION = '3.02';
+
+use Getopt::Long;
+use Pod::Usage;
+
+use Celestial::DBI;
+use Date::Parse;
+use File::Temp;
+
+our $opt_verbose;
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_identifier, $opt_force, $opt_fulltext, $opt_dryrun, $opt_accession, $opt_byyear );
+$opt_dryrun = 0;
+$opt_verbose = 0;
+$opt_fork = 1;
+$opt_fulltext = 1;
+
+GetOptions(
+	'verbose+' => \$opt_verbose,
+	'list' => \$opt_list,
+	'accession' => \$opt_accession,
+	'repository=s' => \$opt_repository,
+	'help' => \$opt_help,
+	'cfg=s' => \$opt_cfg,
+	'byyear' => \$opt_byyear,
+) or pod2usage("Invalid argument");
+
+pod2usage(1) if $opt_help;
+
+if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
+	pod2usage("Repository argument must be numeric.");
+}
+
+$DEBUG = $opt_verbose;
+
+my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
+
+if( $opt_list ) {
+	my @repos = $dbh->listRepositories();
+
+	print "id\tidentifier\n";
+	for (sort { $a->id <=> $b->id } @repos) {
+		printf("%d\t%s\t%s\n", $_->id, $_->identifier, $_->baseURL);
+	}
+	exit(0);
+}
+
+my $iar_dbh = DBI->connect("dbi:mysql:host=leo;port=3316;database=iar","iar","")
+	or die "Unable to connect to ROAR database: $!";
+
+my @repos;
+
+if( defined($opt_repository) )
+{
+	my $repo = $dbh->getRepository($opt_repository)
+		or die "No such repository [$opt_repository]\n";
+	push @repos, $repo;
+}
+else
+{
+	@repos = $dbh->listRepositories();
+}
+
+my %activity;
+
+foreach my $repo (@repos)
+{
+	my $baseURL = $repo->baseURL;
+
+	my $isth = $iar_dbh->prepare("SELECT `id` FROM `live` WHERE `field`='oai' AND `value`=? LIMIT 1");
+	$isth->execute($baseURL) or die $!;
+	my( $id ) = $isth->fetchrow_array or next;
+	$isth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `field`='country' AND `id`=$id LIMIT 1");
+	$isth->execute;
+	my( $country ) = $isth->fetchrow_array or next;
+	next unless $country eq 'uk';
+	$isth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `field`='type' AND `id`=$id LIMIT 1");
+	$isth->execute;
+	my( $type ) = $isth->fetchrow_array or next;
+	next unless $type eq 'institutional';
+	
+	my $mdf = $repo->getMetadataFormat('oai_dc')
+		or next;
+	my $table = $mdf->table;
+
+	print "Processing [$baseURL]\n" if $opt_verbose;
+	my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS d,COUNT(*) FROM `$table` WHERE `accession` BETWEEN NOW() - INTERVAL 1 YEAR AND NOW() GROUP BY d";
+	my $sth = $dbh->prepare($SQL);
+	$sth->execute() or die $!;
+
+	my( $low, $medium, $high ) = (0,0,0);
+	while(my( $d, $c ) = $sth->fetchrow_array)
+	{
+		$low++ if $c > 0 and $c < 10;
+		$medium++ if $c >= 10 and $c < 100;
+		$high++ if $c >= 100;
+	}
+
+	my $start_year = 1990;
+	$SQL = "SELECT YEAR(`accession`) AS d,COUNT(*) AS c FROM `$table` WHERE `accession` BETWEEN ${start_year}0000000000 AND NOW() GROUP BY d";
+	$sth = $dbh->prepare($SQL);
+	$sth->execute() or die $!;
+
+	my @years;
+	while(my( $y, $c ) = $sth->fetchrow_array)
+	{
+		$years[$y-$start_year] = $c;
+		$SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS d,COUNT(*) FROM `$table` WHERE `accession` BETWEEN ${y}0000000000 AND ${y}1231235959 GROUP BY d";
+		my $s = $dbh->prepare($SQL);
+		$s->execute;
+		
+		my( $ylow, $ymedium, $yhigh ) = (0,0,0);
+
+		while( my( $day, $c ) = $s->fetchrow_array )
+		{
+			$ylow++ if $c > 0 and $c < 10;
+			$ymedium++ if $c >= 10 and $c < 100;
+			$yhigh++ if $c >= 100;
+		}
+		
+		$activity{$repo->id}->{$y} = {
+			total => $c,
+			low => $ylow,
+			medium => $ymedium,
+			high => $yhigh,
+		};
+	}
+	my $s = 0;
+	$_ = $s += $_ || 0 for @years;
+
+	my $accession;
+
+	if( $opt_accession )
+	{
+		$SQL = "SELECT DATE_FORMAT(MIN(`accession`),'$Celestial::DBI::DATE_FORMAT') FROM `$table`";
+		$sth = $dbh->prepare($SQL);
+		$sth->execute() or die $!;
+
+		( $accession ) = $sth->fetchrow_array;
+	}
+
+	next;
+
+	$SQL = "SELECT COUNT(*) FROM `$table`";
+	$sth = $dbh->prepare($SQL);
+	$sth->execute() or die $!;
+	my( $total ) = $sth->fetchrow_array;
+
+	my @fields = qw( activity_low activity_medium activity_high recordcount recordhistory );
+
+	$iar_dbh->do("LOCK TABLES `live` WRITE");
+	
+	$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND (" . join(' OR ', map { "`field`='$_'" } @fields ) . ")");
+	$iar_dbh->do("INSERT INTO `live` (`id`,`field`,`value`) VALUES ($id,'activity_low',$low), ($id,'activity_medium',$medium), ($id,'activity_high',$high), ($id,'recordcount',$total), ($id,'recordhistory','".join(',',@years)."')");
+	
+	$sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `id`=$id AND `field`='accession'");
+	$sth->execute or die $!;
+	my( $roar_accession ) = $sth->fetchrow_array;
+	if( defined($accession) and $accession < $roar_accession and $accession > 19900000000000 ) {
+		$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND `field`='accession'");
+		$iar_dbh->do("INSERT INTO `live` VALUES ($id,'accession',$accession)");
+	}
+	
+	$iar_dbh->do("UNLOCK TABLES");
+}
+
+if( $opt_byyear )
+{
+my %byyear;
+
+foreach my $id (sort { $a <=> $b } keys %activity)
+{
+	foreach my $year (sort { $a <=> $b } keys %{$activity{$id}})
+	{
+		$byyear{$year}{total}++;
+		for(qw(low medium high))
+		{
+			push @{$byyear{$year}{$_}}, $activity{$id}{$year}{$_};
+		}
+#		printf("%d\t%d\t%d\t%d\t%d\t%d\n",
+#			$id,
+#			$year,
+#			@{$activity{$id}->{$year}}{qw(total low medium high)},
+#		);
+	}
+}
+
+print "Year,Repositories,Low,Low Mean,Med,Med Mean,High,High Mean\n";
+
+foreach my $year (sort { $a <=> $b } keys %byyear)
+{
+	
+	printf("%d,%d",
+		$year,
+		@{$byyear{$year}}{qw(total)}
+	);
+	for(qw(low medium high))
+	{
+		my @series = @{$byyear{$year}{$_}};
+		my $gm = 0;
+		$gm += $_*$_ for @series;
+		$gm = sqrt($gm);
+		my $s = 0;
+		$s += $_ for @series;
+		print ",$s,$gm";
+	}
+	print "\n";
+}
+}
+
+$dbh->disconnect;
+$iar_dbh->disconnect;
