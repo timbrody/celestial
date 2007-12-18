@@ -95,6 +95,11 @@ sub _oai_links {
 sub _status {
 	my( $self, $body, $CGI, $repo ) = @_;
 
+	if( $CGI->action eq 'unlock' and $CGI->authorised )
+	{
+		$repo->unlock;
+	}
+
 	my $ds = $repo->getLock;
 
 	$body->appendChild( my $table = dataElement( 'table' ));
@@ -109,6 +114,13 @@ sub _status {
 		$tr->appendChild( dataElement( 'td', $CGI->datestamp( $ds )));
 	} else {
 		$tr->appendChild( dataElement( 'td', $CGI->cross, {class=>'state failed'}));
+
+		if( $CGI->authorised )
+		{
+			$body->appendChild( my $p = dataElement( 'p' ));
+			my $url = $CGI->as_link('repository', repository=>$repo->id, action=>'unlock');
+			$p->appendChild( dataElement( 'a', $CGI->msg( 'repository.status.unlock' ), { href => $url } ));
+		}
 	}
 }
 
