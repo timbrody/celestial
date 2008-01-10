@@ -1,0 +1,75 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+B<roar_daemon> - daemon processes for ROAR
+
+=cut
+
+use strict;
+use warnings;
+
+#use encoding 'utf8';
+
+use Celestial::DBI;
+use DBI;
+use Getopt::Long;
+use Pod::Usage;
+require LWP::UserAgent;
+use XML::LibXML;
+use URI;
+
+my( $opt_help, $opt_verbose, $opt_repository );
+$opt_verbose = 0;
+
+GetOptions(
+	"help" => \$opt_help,
+	"verbose+" => \$opt_verbose,
+	"repository=s" => \$opt_repository,
+) or pod2usage("Invalid argument");
+
+die unless defined $opt_repository;
+
+my $dbh = Celestial::DBI->connect() or die "Unable to connect to celestial database: $!";
+
+my $iar_dbh = DBI->connect("dbi:mysql:host=leo;port=3316;database=iar","iar","")
+	or die "Unable to connect to ROAR database: $!";
+
+my $ua = LWP::UserAgent->new;
+
+if( $opt_repository =~ /\D/ )
+{
+	my $sth = $iar_dbh->prepare("SELECT id FROM live WHERE value=?");
+	$sth->execute( $opt_repository );
+	($opt_repository) = $sth->fetchrow_array
+		or pod2usage("Unable to find repository matching: $opt_repository");
+}
+
+my $id = $opt_repository;
+
+my $sth = $iar_dbh->prepare("SELECT value FROM live WHERE id=$id AND field='url'");
+$sth->execute;
+
+my( $url ) = $sth->fetchrow_array;
+
+my $r = $ua->get( $url );
+
+my $sword_url;
+
+if( $r->is_success )
+{
+	print "Got $url\n";
+	my $doc = XML::LibXML->new->parse_html_string( $r->content );
+
+	my @nodes = $doc->findnodes('/html/head/link');
+	foreach my $link (@nodes)
+	{
+		print STDERR "Found link: ".$link->toString."\n" if $opt_verbose;
+		if( $link->hasAttribute('ref') and $link->getAttribute('rel') eq 'sword' )
+		{
+			$sword_url = URI->new( $link->getAttribute( 'href' ), $url );
+		}
+	}
+}
+
+print $sword_url, "\n" if $sword_url;
