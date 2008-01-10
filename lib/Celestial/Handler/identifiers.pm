@@ -47,7 +47,7 @@ sub page
 	$from ||= $self->now(" - INTERVAL 1 YEAR");
 	$until ||= $self->now('');
 	my $baseURL = $vars{baseURL} or return $self->error( $CGI, "Requires baseURL");
-	my $format = $vars{format} || 'table';
+	my $format = $vars{format} || '';
 	my $dataset = $vars{dataset};
 	my $width = $vars{width} || 0;
 	my $height = $vars{height} || 0;
