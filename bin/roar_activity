@@ -251,8 +251,13 @@ foreach my $year (sort { $a <=> $b } keys %byyear)
 	{
 		my @series = @{$byyear{$year}{$_}};
 		my $gm = 0;
-		$gm += $_*$_ for @series;
-		$gm = sqrt($gm);
+		my @gm_series = grep { $_ > 0 } @series;
+		if( @gm_series )
+		{
+			$gm = $gm_series[0];
+			$gm *= $_ for @gm_series[1..$#gm_series];
+			$gm **= (1/scalar(@gm_series));
+		}
 		my $s = 0;
 		$s += $_ for @series;
 		print ",$s,$gm";
