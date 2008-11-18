@@ -25,6 +25,11 @@ use constant {
 
 use vars qw( @FOUND_URLS );
 
+our @IGNORE_URL_REGEXP = (
+	qr/www\.openarchives\.org/,
+	qr/www\.w3\.org/,
+);
+
 sub navbar {
 	my( $class, $CGI ) = @_;
 	return $CGI->authorised;
@@ -137,15 +142,22 @@ sub extract_urls {
 
 	URI::Find->new(\&_find_cb)->find( $r->content_ref );
 
-	for(@FOUND_URLS) {
-		$_ = $_->canonical;
-		next if exists($state{$_});
-		push @base_urls, $_;
-		if( defined(my $id = $dbh->getRepositoryBaseURL( $_ )) ) {
-			$state{$_} = ADDED;
+	foreach my $url (@FOUND_URLS)
+	{
+		$url = $url->canonical;
+		next if exists($state{$url});
+		my $ignore = 0;
+		for(@IGNORE_URL_REGEXP)
+		{
+			($url =~ $_) && ($ignore = 1) && last;
+		}
+		next if $ignore;
+		push @base_urls, $url;
+		if( defined(my $id = $dbh->getRepositoryBaseURL( $url )) ) {
+			$state{$url} = ADDED;
 		} else {
-			$state{$_} = UNKNOWN;
-			push @unknown, $_;
+			$state{$url} = UNKNOWN;
+			push @unknown, $url;
 		}
 	}
 
