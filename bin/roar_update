@@ -22,11 +22,11 @@ Show this page.
 
 =item B<--list>
 
-List all configured repositories.
+(DISABLED!) List all configured repositories.
 
 =item B<--repository>
 
-Harvest only the repository given (use B<--list> to get a list of identifiers).
+(DISABLED!) Harvest only the repository given (use B<--list> to get a list of identifiers).
 
 =item B<--accession>
 
@@ -97,7 +97,7 @@ if( $opt_list ) {
 	exit(0);
 }
 
-my $iar_dbh = DBI->connect("dbi:mysql:host=leo;port=3316;database=iar","iar","")
+my $iar_dbh = DBI->connect("dbi:mysql:host=eprints-stats;port=3306;database=iar","iar","")
 	or die "Unable to connect to ROAR database: $!";
 
 my @repos;
@@ -113,73 +113,114 @@ else
 	@repos = $dbh->listRepositories();
 }
 
-foreach my $repo (@repos)
+my $sth;
+
+my $isth = $iar_dbh->prepare("SELECT DISTINCT `id` FROM `live` WHERE `field`='oai'");
+$isth->execute;
+while(my( $id ) = $isth->fetchrow_array)
 {
-	my $baseURL = $repo->baseURL;
-
-	my $isth = $iar_dbh->prepare("SELECT `id` FROM `live` WHERE `field`='oai' AND `value`=? LIMIT 1");
-	$isth->execute($baseURL) or die $!;
-	my( $id ) = $isth->fetchrow_array or next;
-	
-	my $mdf = $repo->getMetadataFormat('oai_dc')
-		or next;
-	my $table = $mdf->table;
-
-	print "Processing [$baseURL]\n" if $opt_verbose;
-	my $SQL = "SELECT DATE_FORMAT(`accession`,'\%Y\%m\%d') AS d,COUNT(*) FROM `$table` WHERE `accession` BETWEEN NOW() - INTERVAL 1 YEAR AND NOW() GROUP BY d";
-	my $sth = $dbh->prepare($SQL);
-	$sth->execute() or die $!;
-
+	my @days;
 	my( $low, $medium, $high ) = (0,0,0);
-	while(my( $d, $c ) = $sth->fetchrow_array)
+	my( @years, $total, $accession );
+
+	print "\nUpdating ROAR record $id\n" if $opt_verbose;
+
+	my $bu_sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `field`='oai' AND `id`=$id");
+	$bu_sth->execute;
+	while(my( $baseURL ) = $bu_sth->fetchrow_array)
 	{
-		$low++ if $c > 0 and $c < 10;
-		$medium++ if $c >= 10 and $c < 100;
-		$high++ if $c >= 100;
-	}
+		my $repo = $dbh->getRepositoryByBaseURL( $baseURL );
+		next unless defined $repo;
 
-	my $start_year = 1990;
-	$SQL = "SELECT YEAR(`accession`) AS d,COUNT(*) AS c FROM `$table` WHERE `accession` BETWEEN ${start_year}0000000000 AND NOW() GROUP BY d";
-	$sth = $dbh->prepare($SQL);
-	$sth->execute() or die $!;
+		my $mdf = $repo->getMetadataFormat( "oai_dc" );
+		next unless defined $mdf;
 
-	my @years;
-	while(my( $y, $c ) = $sth->fetchrow_array)
-	{
-		$years[$y-$start_year] = $c;
-	}
-	my $s = 0;
-	$_ = $s += $_ || 0 for @years;
+		print "Fetching data for interface $baseURL\n" if $opt_verbose;
 
-	my $accession;
+		my $table = $mdf->table();
 
-	if( $opt_accession )
-	{
-		$SQL = "SELECT DATE_FORMAT(MIN(`accession`),'$Celestial::DBI::DATE_FORMAT') FROM `$table`";
+		# get the number of records deposited on each day for the last year
+		my $SQL = "SELECT TO_DAYS(NOW())-TO_DAYS(`accession`) d,COUNT(*) FROM `$table` WHERE `accession` BETWEEN NOW() - INTERVAL 1 YEAR AND NOW() GROUP BY d";
 		$sth = $dbh->prepare($SQL);
 		$sth->execute() or die $!;
 
-		( $accession ) = $sth->fetchrow_array;
+		while(my( $d, $c ) = $sth->fetchrow_array)
+		{
+			$days[$d] += $c;
+		}
+		
+		# get the number of records deposited each year since 1990
+		my $start_year = 1990;
+		$SQL = "SELECT YEAR(`accession`) AS d,COUNT(*) AS c FROM `$table` WHERE `accession` BETWEEN ${start_year}0000000000 AND NOW() GROUP BY d";
+		$sth = $dbh->prepare($SQL);
+		$sth->execute() or die $!;
+
+		while(my( $y, $c ) = $sth->fetchrow_array)
+		{
+			$years[$y-$start_year] += $c;
+		}
+
+		# get the earliest dated record
+		if( $opt_accession )
+		{
+			$SQL = "SELECT DATE_FORMAT(MIN(`accession`),'$Celestial::DBI::DATE_FORMAT') FROM `$table`";
+			$sth = $dbh->prepare($SQL);
+			$sth->execute() or die $!;
+
+			my( $i ) = $sth->fetchrow_array;
+			$accession = $i if !defined $accession or $i lt $accession;
+		}
+
+		# get the total number of records (inc. <1990)
+		$SQL = "SELECT COUNT(*) FROM `$table`";
+		$sth = $dbh->prepare($SQL);
+		$sth->execute() or die $!;
+		$total += $sth->fetch->[0];
 	}
 
-	$SQL = "SELECT COUNT(*) FROM `$table`";
-	$sth = $dbh->prepare($SQL);
-	$sth->execute() or die $!;
-	my( $total ) = $sth->fetchrow_array;
+	# no data found!
+	next unless defined $total;
 
-	my @fields = qw( activity_low activity_medium activity_high recordcount recordhistory );
+	# work out the amount of "activity" (records/day)
+	for(@days)
+	{
+		next unless defined $_;
+		$low++ if $_ > 0 and $_ < 10;
+		$medium++ if $_ >= 10 and $_ < 100;
+		$high++ if $_ >= 100;
+	}
 
+	# pad out empty years
+	for(1990..((gmtime(time))[5]+1900))
+	{
+		$years[$_-1990] ||= 0;
+	}
+
+	# make year counts cumulative
+	my $sum = 0;
+	$_ = ($sum += ($_ || 0)) for @years;
+
+	# update ROAR
 	$iar_dbh->do("LOCK TABLES `live` WRITE");
 	
+	my @fields = qw( activity_low activity_medium activity_high recordcount recordhistory );
+
+	print "Updating ROAR record for $id\n" if $opt_verbose;
+	print "activity_low=$low, activity_medium=$medium, activity_high=$high, recordcount=$total\n" if $opt_verbose;
+	print "recordhistory=@years\n" if $opt_verbose;
+
 	$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND (" . join(' OR ', map { "`field`='$_'" } @fields ) . ")");
 	$iar_dbh->do("INSERT INTO `live` (`id`,`field`,`value`) VALUES ($id,'activity_low',$low), ($id,'activity_medium',$medium), ($id,'activity_high',$high), ($id,'recordcount',$total), ($id,'recordhistory','".join(',',@years)."')");
 	
-	$sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `id`=$id AND `field`='accession'");
-	$sth->execute or die $!;
-	my( $roar_accession ) = $sth->fetchrow_array;
-	if( defined($accession) and $accession < $roar_accession and $accession > 19900000000000 ) {
-		$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND `field`='accession'");
-		$iar_dbh->do("INSERT INTO `live` VALUES ($id,'accession',$accession)");
+	if( defined($accession) )
+	{
+		$sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `id`=$id AND `field`='accession'");
+		$sth->execute or die $!;
+		my( $roar_accession ) = $sth->fetchrow_array;
+		if( $accession < $roar_accession and $accession > 19900000000000 ) {
+			$iar_dbh->do("DELETE FROM `live` WHERE `id`=$id AND `field`='accession'");
+			$iar_dbh->do("INSERT INTO `live` VALUES ($id,'accession',?)",{},$accession);
+		}
 	}
 	
 	$iar_dbh->do("UNLOCK TABLES");

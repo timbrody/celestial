@@ -468,6 +468,21 @@ sub getRepositoryBaseURL($$) {
 	return $id;
 }
 
+=item $repo = $dbh->getRepositoryByBaseURL($baseURL)
+
+Get a repository using its baseURL.
+
+=cut
+
+sub getRepositoryByBaseURL($$) {
+	my ($self,$baseURL) = @_;
+	my $sth = $self->prepare("SELECT id FROM Repositories WHERE `baseURL`=?");
+	$sth->execute($baseURL);
+	my ($id) = $sth->fetchrow_array() or return undef;
+	$sth->finish;
+	return defined $id ? $self->getRepository( $id ) : undef;
+}
+
 =item @repos = $dbh->listRepositories()
 
 Return a list of all the repositories.
