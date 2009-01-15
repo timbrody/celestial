@@ -346,6 +346,18 @@ sub update_repository {
 			from=>datestamp($lastHarvest, $GRANULARITY == WITH_SECONDS),
 			resumptionToken=>$token,
 		);
+		if( defined $token && $lastError )
+		{
+			# If we got an error, get rid of the last token and try again
+			$dbh->lastToken($mdf, undef);
+			($lastURL, $lastError, $lastResponse ) = &$harvest_func($dbh,
+				harvestAgent=>$ha,
+				repository=>$repo,
+				metadataFormat=>$mdf,
+				from=>datestamp($lastHarvest, $GRANULARITY == WITH_SECONDS),
+				resumptionToken=>$token,
+			);
+		}
 		if( $lastError ) {
 			warn $lastError;
 			$dbh->addError($mdf,$lastURL,$lastError,$lastResponse);
