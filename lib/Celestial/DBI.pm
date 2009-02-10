@@ -43,6 +43,8 @@ There is no facility for removing single records, instead you should addRecord w
 	# Removing a repository
 	$repo->remove;
 
+=head1 METHODS
+
 =over 4
 
 =cut
@@ -116,7 +118,7 @@ sub connect {
 	my $dsn = $self->{_dsn} = "dbi:mysql:" . join(';', @opts);
 	unless( $self->dbh(DBI->connect($dsn, $user, $pw, {
 		PrintError => 1,
-		RaiseError => 0,
+		RaiseError => 1,
 	})) ) {
 		$errstr = $DBI::errstr;
 		return undef;
@@ -124,12 +126,30 @@ sub connect {
 	return $self;
 }
 
+=item $dbh->reconnect()
+
+Attempt to re-connect to the MySQL database server, carps and returns undef if it failed.
+
+=cut
+
 sub reconnect {
-	my $self = shift;
-	# Don't overwrite the existing handle in case we need the error message
-	# that triggered this reconnect
-	my $dbh = DBI->connect($self->{_dsn}, $self->{_username}, $self->{_password})
-		or return undef;
+	my( $self ) = @_;
+
+	$self->dbh->disconnect;
+	$self->dbh( undef );
+	sleep(3);
+
+	my $dbh = DBI->connect(
+		$self->{_dsn}, $self->{_username}, $self->{_password}, {
+			PrintError => 1,
+			RaiseError => 1,
+		});
+	unless( defined $dbh )
+	{
+		Carp::carp "Error during reconnection: $DBI::errstr\n";
+		return undef;
+	}
+
 	return $self->dbh( $dbh );
 }
 
@@ -154,6 +174,12 @@ sub parser { $_[0]->{_parser} }
 #	return $self->dbh->prepare_cached($SQL);
 #}
 
+=item $datetime = $dbh->now()
+
+Returns the current system time in yyyymmddHHMMSS format.
+
+=cut
+
 sub now {
 	return strftime("%Y%m%d%H%M%S",gmtime);
 }
@@ -168,7 +194,7 @@ Formats a timestamp yyyymmddHHMMSS to yyyy-mm-ddTHH:MM:SSZ.
 
 sub datestamp {
 	return
-		shift =~ /(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)/ ? 
+		$_[0] =~ /(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)/ ? 
 		"$1-$2-$3T$4:$5:$6Z" :
 		undef;
 }
@@ -182,8 +208,7 @@ Perform a null query to the database, to either keep the connection alive or to 
 =cut
 
 sub ping {
-	my $self = shift;
-	eval { $self->do("SELECT 1") };
+	eval { $_[0]->do("SELECT 1") };
 	return $@;
 }
 
@@ -212,15 +237,17 @@ sub AUTOLOAD {
 	$AUTOLOAD =~ s/^.*:://;
 #	warn "${self}::$AUTOLOAD(".join(',',@_).")\n";
 	RETRY:
-	$dbh->{RaiseError} = 0;
+	local $dbh->{RaiseError} = 0;
 	my @r = $dbh->$AUTOLOAD(@_);
 	if( defined $dbh->err ) {
 		if( $dbh->errstr =~ /MySQL server has gone away/ ) {
 			if( $self->reconnect ) {
 				goto RETRY;
+			} else {
+				Carp::confess "Could not reconnect to MySQL server after $AUTOLOAD() call\n";
 			}
 		}
-		Carp::confess "Database error: " . $dbh->errstr;
+		Carp::confess "Fatal database error: ".$dbh->errstr."\n";
 	}
 	return wantarray ? @r : $r[0];
 }
@@ -288,10 +315,9 @@ Returns true if a table $name exists in the database.
 
 sub table_exists {
 	my ($self,$name) = @_;
-	Carp::confess "table_exists: Table names must contain only [a-zA-Z0-9_]" if $name =~ /[^a-zA-Z0-9_]/;
 	local $self->dbh->{PrintError} = 0;
 	local $self->dbh->{RaiseError} = 0;
-	my $rc = $self->dbh->do("DESCRIBE `$name`");
+	my $rc = $self->dbh->do("DESCRIBE ".$self->quote_identifier($name));
 	return defined($rc) ? 1 : 0;
 }
 
@@ -303,8 +329,8 @@ Returns the number of records in table $name
 
 sub cardinality {
 	my ($self,$name) = @_;
-	my $sth = $self->prepare("SELECT COUNT(*) FROM `$name`");
-	$sth->execute() or Carp::confess $!;
+	my $sth = $self->prepare("SELECT COUNT(*) FROM ".$self->quote_identifier($name));
+	$sth->execute();
 	my ($c) = $sth->fetchrow_array();
 	$sth->finish;
 	return $c;
@@ -318,8 +344,8 @@ Returns the number of bytes used by table $name (as reported by MySQL's SHOW TAB
 
 sub storage {
 	my( $self, $name ) = @_;
-	my $sth = $self->prepare("SHOW TABLE STATUS LIKE '$name'");
-	$sth->execute;
+	my $sth = $self->prepare("SHOW TABLE STATUS LIKE ?");
+	$sth->execute($name);
 	my $row = $sth->fetchrow_hashref;
 	return $row->{Data_length};
 }
@@ -529,12 +555,11 @@ Add a new repository $repo to the database.
 sub addRepository($$) {
 	my( $self, $repo ) = @_;
 
-	my $sth = $self->prepare(my $sql = sprintf('INSERT INTO Repositories (%s) VALUES (%s)',
-		join(',',map{"`$_`"} @Celestial::DBI::Repository::COLUMNS),
+	my $sth = $self->prepare(sprintf('INSERT INTO Repositories (%s) VALUES (%s)',
+		join(',',map{$self->quote_identifier($_)} @Celestial::DBI::Repository::COLUMNS),
 		join(',',map{'?'} @Celestial::DBI::Repository::COLUMNS)
 	));
-	$sth->execute(map { $repo->$_ } @Celestial::DBI::Repository::COLUMNS)
-		or die "$sql: $!";
+	$sth->execute(map { $repo->$_ } @Celestial::DBI::Repository::COLUMNS);
 	if( !defined($repo->id) ) {
 		$repo = $self->getRepository($self->dbh->{mysql_insertid});
 	}
@@ -549,7 +574,7 @@ sub addRepository($$) {
 sub listMetadataFormats {
 	my ($self, $repo) = @_;
 	my $cols = join(',',
-		map({ "`$_`" } @Celestial::DBI::MetadataFormat::COLUMNS),
+		map({$self->quote_identifier($_)} @Celestial::DBI::MetadataFormat::COLUMNS),
 		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::DBI::MetadataFormat::DATE_COLUMNS));
 	my $sth = $self->prepare("SELECT $cols FROM MetadataFormats WHERE `repository`=?");
 	$sth->execute($repo->id);
@@ -573,10 +598,10 @@ sub getMetadataFormat {
 		map({ "DATE_FORMAT(`$_`,'$DATE_FORMAT') as `$_`" } @Celestial::DBI::MetadataFormat::DATE_COLUMNS));
 	if( defined($mdp) and $repo->isa('Celestial::DBI::Repository') ) {
 		$sth = $self->prepare("SELECT $cols FROM MetadataFormats WHERE `repository`=? AND `metadataPrefix`=?");
-		$sth->execute($repo->id, $mdp) or Carp::confess("Error getting metadata table for $mdp: $!");
+		$sth->execute($repo->id, $mdp);
 	} elsif( $repo !~ /\D/ ) {
 		$sth = $self->prepare("SELECT $cols FROM MetadataFormats WHERE `id`=$repo");
-		$sth->execute or Carp::confess("Error getting metadata table for $mdp: $!");
+		$sth->execute;
 	} else {
 		Carp::confess("Invalid arguments: Requires either repository and prefix or metadata format id\n");
 	}
@@ -603,7 +628,7 @@ sub updateMetadataFormat {
 		join(',',map({'?'} @cols)) .
 		")",{},
 		map({ref($mdf->$_) ? $mdf->$_->id : $mdf->$_} @cols)
-	) or die $!;
+	);
 	return $mdf;
 }
 

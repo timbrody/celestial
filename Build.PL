@@ -55,6 +55,9 @@ my $build = $class->new(
 		'URI::Find' => '0.1',
 		'CGI' => '3.05',
 		'Number::Bytes::Human' => '0.04',
+		'MIME::Types' => '0.01',
+		'Date::Parse' => '0.01',
+		'DBD::mysql' => '0.01',
 	},
 	install_path => {
 		conf => '/etc/celestial',

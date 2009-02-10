@@ -83,7 +83,7 @@ $VERSION = '3.02';
 $HTTP_TIMEOUT = 300; # In seconds
 $MAX_FILE_SIZE = 1024*1024*10; # 10MB
 
-$JAVA = '/usr/java/jdk1.5.0_06/bin/java';
+$JAVA = '/usr/bin/java';
 $DROID = '/home/celestial/share/DROID/DROID.jar';
 $DROID_SIG = '/home/celestial/share/DROID/DROID_SignatureFile.xml';
 
@@ -92,8 +92,7 @@ use Pod::Usage;
 
 use HTTP::OAI;
 use HTTP::OAI::Metadata::OAI_DC;
-use Celestial::FullText;
-use Celestial::DBI;
+use Celestial;
 use Date::Parse;
 use File::Temp;
 use XML::LibXML;
@@ -142,10 +141,16 @@ if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 
 $DEBUG = $opt_verbose;
 
+my $cfg  = Celestial::Config->new( $opt_cfg );
+
 my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 
 $ADMINEMAIL = $dbh->adminEmail or die "No adminEmail configured (required to harvest)\n";
 $MAX_HARVESTERS = $dbh->maxHarvesters || 10;
+
+$JAVA = $cfg->get_conf( "java" ) || $JAVA;
+$DROID = $cfg->get_conf( "droid", "jar" ) || $DROID;
+$DROID_SIG = $cfg->get_conf( "droid", "signature" ) || $DROID_SIG;
 
 # Set up the environment
 $0 = "celestial-harvest";
@@ -355,7 +360,6 @@ sub update_repository {
 				repository=>$repo,
 				metadataFormat=>$mdf,
 				from=>datestamp($lastHarvest, $GRANULARITY == WITH_SECONDS),
-				resumptionToken=>$token,
 			);
 		}
 		if( $lastError ) {
