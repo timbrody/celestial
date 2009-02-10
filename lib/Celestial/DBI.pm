@@ -925,8 +925,8 @@ sub updateMetadata
 
 	if(
 		length($hd) > $DB_MAX_FIELD_SIZE or
-		length($md) > $DB_MAX_FIELD_SIZE or
-		length($ab) > $DB_MAX_FIELD_SIZE
+		(defined($md) and length($md) > $DB_MAX_FIELD_SIZE) or
+		(defined($ab) and length($ab) > $DB_MAX_FIELD_SIZE)
 		)
 	{
 		warn $repo->id . " " . $rec->identifier . " is larger than max allowed size ($DB_MAX_FIELD_SIZE)\n";
