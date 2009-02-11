@@ -167,6 +167,10 @@ sub _dspace
 	my $ha = $self->{ ha };
 	my @fmts;
 	my( $jo_url ) = grep { /^https?:\/\// } @{$rec->metadata->dc->{ identifier }};
+	if( !defined $jo_url )
+	{
+		return ();
+	}
 warn "GET $jo_url\n" if $DEBUG;
 	my $jo = $ha->get( $jo_url );
 	unless( $jo->is_success ) {
