@@ -79,7 +79,7 @@ sub handler
 		my $url = URI->new($q->self_url());
 			$url->query(undef);
 			$url = $url->path;
-		my $script_path = $SETTINGS->{ paths }->{ script };
+		my $script_path = $Celestial::Config::SETTINGS->{ paths }->{ script };
 		die "Script path undefined in the configuration"
 			unless defined $script_path;
 # || URI->new(CGI::url())->path;
