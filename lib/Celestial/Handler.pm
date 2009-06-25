@@ -1,15 +1,13 @@
 package Celestial::Handler;
 
-use strict;
-use warnings;
+use Exporter;
+@ISA = qw(Exporter);
 
-use Carp;
+use strict;
 
 use vars qw( @ORDER @NAVBAR $DEFAULT $dbh $dom );
 
-use vars qw( @ISA @EXPORT @EXPORT_OK );
-use Exporter;
-@ISA = qw(Exporter);
+use vars qw( @EXPORT @EXPORT_OK );
 @EXPORT = qw( @ORDER $DEFAULT &dataElement &abbr_url &formElement &tableRowElement &urlElement );
 @EXPORT_OK = qw( @ORDER $DEFAULT &dataElement &abbr_url &formElement &tableRowElement &urlElement );
 

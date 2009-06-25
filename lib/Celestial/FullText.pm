@@ -42,9 +42,7 @@ None by default.
 package Celestial::FullText;
 
 use strict;
-use warnings;
 
-use Carp;
 use URI;
 use HTTP::OAI;
 use HTTP::OAI::Metadata::OAI_DC;

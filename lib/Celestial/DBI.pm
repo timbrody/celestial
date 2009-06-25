@@ -50,7 +50,6 @@ There is no facility for removing single records, instead you should addRecord w
 =cut
 
 use strict;
-use warnings;
 use encoding 'utf8';
 
 use Celestial::Config;
@@ -70,8 +69,6 @@ use Encode;
 use Net::SMTP;
 
 use HTTP::OAI;
-
-use Carp;
 
 use vars qw($AUTOLOAD $errstr );
 

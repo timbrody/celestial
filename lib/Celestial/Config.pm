@@ -1,5 +1,7 @@
 package Celestial::Config;
 
+use YAML;
+
 =head1 NAME
 
 Celestial::Config - Read config file
@@ -17,10 +19,6 @@ Celestial::Config - Read config file
 =cut
 
 use strict;
-use warnings;
-
-use Carp;
-use YAML;
 
 our $SETTINGS;
 our $CFG_ROOT = '/etc/celestial';
@@ -36,6 +34,8 @@ sub new
 	my $self = $class->load_config( $cfg_file )
 		or Carp::croak "Error loading config file $cfg_file: $!";
 
+	$self = bless $self, $class;
+
 	$self->{ paths } ||= {};
 	$self->{ paths }->{ config } = $cfg_file;
 	$self->{ paths }->{ html } ||= "$CFG_ROOT/html";
@@ -44,9 +44,10 @@ sub new
 		$_ =~ s/\/+$//;
 	}
 
-	$self->{ languages } = $class->load_languages( $self->{paths}->{languages} );
-
-	$self = bless $self, $class;
+	$self->{ languages } = $self->load_languages( $self->{paths}->{languages} );
+	unless( scalar keys %{$self->{ languages }} ) {
+		Carp::croak "No language files found in $self->{paths}->{languages}";
+	}
 
 	$SETTINGS = $self;
 
@@ -87,12 +88,15 @@ sub load_languages
 
 	opendir( my $dir, $path )
 		or Carp::croak "Error opening language directory $path: $!";
-	my @files = grep { -f "$dir/$_" and /^[^.]/ and /\.yml$/i } readdir( $dir );
+	my @files = readdir( $dir );
 	closedir( $dir );
 
-	foreach my $file (@files)
+	for(@files)
 	{
-		$langs{ $1 } = "$path/$file";
+		next unless /\.yml$/;
+		next if /^\./;
+		next unless -f "$path/$_";
+		$langs{ substr($_,0,-4) } = "$path/$_";
 	}
 
 	return \%langs;

@@ -1,8 +1,7 @@
 package Celestial::DBI::Encapsulation;
 
-use Carp qw( confess );
-use vars qw($AUTOLOAD);
 use encoding 'utf8';
+use vars qw($AUTOLOAD);
 
 sub new {
 	my $class = shift;
@@ -20,7 +19,7 @@ sub require {
 	my $self = shift;
 	for(@_) {
 		unless(defined($self->{_elem}->{$_})) {
-			confess("Requires argument: $_");
+			Carp::confess("Requires argument: $_");
 		}
 	}
 }

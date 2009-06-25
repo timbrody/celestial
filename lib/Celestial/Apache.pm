@@ -1,8 +1,9 @@
 package Celestial::Apache;
 
 use strict;
-use warnings;
 use encoding 'utf8'; # Byte strings are also utf8
+
+use CGI::Carp qw( fatalsToBrowser warningsToBrowser );
 
 use Celestial;
 
@@ -68,6 +69,7 @@ sub handler
 
 	my $dbh = Celestial::DBI->connect()
 		or die("Unable to connect to database: " . $Celestial::DBI::errstr);
+
 	my $dom = XML::LibXML::Document->new('1.0','UTF-8');
 
 	$Handler::dom = $dom; # for dataElement

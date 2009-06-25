@@ -14,6 +14,8 @@ use vars qw( $VERSION );
 
 $VERSION = 2.0;
 
+use Carp;
+
 use Celestial::Config;
 use Celestial::DBI;
 use Celestial::FullText;

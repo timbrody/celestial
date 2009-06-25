@@ -1,22 +1,24 @@
 package Celestial::CGI;
 
-use strict;
-use warnings;
+use Exporter;
+@ISA = qw( Exporter );
+@EXPORT = qw( uri_escape uri_unescape );
 
 use YAML;
-use vars qw( $AUTOLOAD );
 use Apache2::Const qw( REDIRECT NOT_FOUND SERVER_ERROR );
 use URI;
 use URI::Escape qw();
 use Number::Bytes::Human qw();
 
-use vars qw( @ISA @EXPORT @EXPORT_OK );
-use Exporter;
-@ISA = qw( Exporter );
-@EXPORT = qw( uri_escape uri_unescape );
+use strict;
+
+use vars qw( $AUTOLOAD );
 
 sub new {
 	my( $class, %opts ) = @_;
+	if( !defined $Celestial::Config::SETTINGS->{ languages }->{ en_GB } ) {
+		Carp::confess "en_GB language not available, can't continue"; 
+	}
 	$opts{phrases} = load_phrases($Celestial::Config::SETTINGS->{ languages }->{ en_GB });
 	bless \%opts, $class;
 }
