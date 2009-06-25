@@ -107,10 +107,12 @@ sub connect {
 	my $class = shift;
 	my $self = $class->new();
 	my $db = $Celestial::Config::SETTINGS
-		or die "Unable to get database settings";
+		or Carp::croak "Unable to get database settings";
 	my $user = $self->{_username} = $db->{ username };
 	my $pw = $self->{_password} = $db->{ password };
-	my @opts;
+	my @opts (
+		"mysql_auto_reconnect=1",
+	);
 	for(qw( database host port )) {
 		next unless exists( $db->{ $_ });
 		push @opts, join( '=', $_ => $db->{ $_ });
@@ -119,6 +121,7 @@ sub connect {
 	unless( $self->dbh(DBI->connect($dsn, $user, $pw, {
 		PrintError => 1,
 		RaiseError => 1,
+		AutoCommit => 1,
 	})) ) {
 		$errstr = $DBI::errstr;
 		return undef;
@@ -144,7 +147,7 @@ sub reconnect {
 			PrintError => 1,
 			RaiseError => 1,
 		});
-	unless( defined $dbh )
+	unless( defined $dbh && $dbh->ping )
 	{
 		Carp::carp "Error during reconnection: $DBI::errstr\n";
 		return undef;
@@ -237,10 +240,11 @@ sub AUTOLOAD {
 	$AUTOLOAD =~ s/^.*:://;
 #	warn "${self}::$AUTOLOAD(".join(',',@_).")\n";
 	RETRY:
-	local $dbh->{RaiseError} = 0;
+#	local $dbh->{RaiseError} = 0;
 	my @r = $dbh->$AUTOLOAD(@_);
 	if( defined $dbh->err ) {
 		if( $dbh->errstr =~ /MySQL server has gone away/ ) {
+			Carp::carp "MySQL server has gone away during $AUTOLOAD";
 			if( $self->reconnect ) {
 				goto RETRY;
 			} else {
