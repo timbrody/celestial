@@ -64,6 +64,8 @@ sub handler
 
 ###########################################################
 
+	my $cfg = Celestial::Config->new;
+
 	my $dbh = Celestial::DBI->connect()
 		or die("Unable to connect to database: " . $Celestial::DBI::errstr);
 	my $dom = XML::LibXML::Document->new('1.0','UTF-8');
