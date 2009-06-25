@@ -94,7 +94,7 @@ sub page
 	}
 	if( defined $set ) {
 		push @logic, "`set` = $set";
-		$tables .= " INNER JOIN `$sm_table` ON `id`=`record`";
+		$tables .= " INNER JOIN `$sm_table` ON `id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`";
 	}
 	my( @b4_logic, @b4_values );
 	if( $from )
@@ -300,7 +300,7 @@ sub page
 	}
 	elsif( $format eq 'histogram' )
 	{
-		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,COUNT(*) FROM `$table` AS R INNER JOIN `$sm_table` ON R.`id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d";
+		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,COUNT(*) FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d";
 		my $sth = $dbh->prepare($SQL);
 		$sth->execute(@values) or die $dbh->errstr;
 		
@@ -323,7 +323,7 @@ sub page
 	}
 	elsif( $format eq 'table' )
 	{
-		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,COUNT(*) FROM `$table` AS R INNER JOIN `$sm_table` ON R.`id`=`record` INNER JOIN `$sets_table` AS S ON `set`=S.`id`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d";
+		my $SQL = "SELECT DATE_FORMAT(`accession`,'$date_format') AS d,COUNT(*) c FROM $tables" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '') . " GROUP BY d";
 		my $sth = $dbh->prepare($SQL);
 		$sth->execute(@values) or die $dbh->errstr;
 		
