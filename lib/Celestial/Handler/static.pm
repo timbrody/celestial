@@ -1,12 +1,10 @@
 package Celestial::Handler::static;
 
-use strict;
-use warnings;
-
 use Celestial::Handler;
-use Celestial::Config;
-use vars qw( @ISA );
+
 @ISA = qw( Celestial::Handler );
+
+use strict;
 
 push @ORDER, 'static';
 
@@ -31,7 +29,7 @@ sub page
 		return;
 	}
 	
-	my $css_file = $SETTINGS->{ paths }->{ html } . '/' . $file;
+	my $css_file = $Celestial::Config::SETTINGS->{ paths }->{ html } . '/' . $file;
 	
 	unless( -e $css_file ) {
 		$CGI->not_found;

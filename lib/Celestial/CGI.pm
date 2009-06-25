@@ -3,8 +3,6 @@ package Celestial::CGI;
 use strict;
 use warnings;
 
-use Celestial::Config; # Exports $SETTINGS
-
 use YAML;
 use vars qw( $AUTOLOAD );
 use Apache2::Const qw( REDIRECT NOT_FOUND SERVER_ERROR );

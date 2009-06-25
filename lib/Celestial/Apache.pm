@@ -4,8 +4,7 @@ use strict;
 use warnings;
 use encoding 'utf8'; # Byte strings are also utf8
 
-use Celestial::Config; # Exports $SETTINGS
-use Celestial::CGI;
+use Celestial;
 
 use CGI qw/-oldstyle_urls/;
 use URI;
@@ -15,7 +14,6 @@ use HTTP::Request;
 use LWP::UserAgent;
 use HTTP::OAI::Harvester;
 use XML::LibXML;
-use Celestial::DBI;
 
 use mod_perl;
 use APR::Table;

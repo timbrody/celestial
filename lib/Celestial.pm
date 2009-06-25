@@ -17,3 +17,4 @@ $VERSION = 2.0;
 use Celestial::Config;
 use Celestial::DBI;
 use Celestial::FullText;
+use Celestial::CGI;
