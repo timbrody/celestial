@@ -110,7 +110,7 @@ sub connect {
 		or Carp::croak "Unable to get database settings";
 	my $user = $self->{_username} = $db->{ username };
 	my $pw = $self->{_password} = $db->{ password };
-	my @opts (
+	my @opts = (
 		"mysql_auto_reconnect=1",
 	);
 	for(qw( database host port )) {
