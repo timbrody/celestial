@@ -57,7 +57,7 @@ $VERSION = '3.02';
 use Getopt::Long;
 use Pod::Usage;
 
-use Celestial::DBI;
+use Celestial;
 use Date::Parse;
 use File::Temp;
 
@@ -84,6 +84,8 @@ if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 }
 
 $DEBUG = $opt_verbose;
+
+my $cfg = Celestial::Config->new( $opt_cfg );
 
 my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
 
