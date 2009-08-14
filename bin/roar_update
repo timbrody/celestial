@@ -178,6 +178,7 @@ while(my( $id ) = $isth->fetchrow_array)
 		$sth = $dbh->prepare($SQL);
 		$sth->execute() or die $!;
 		$total += $sth->fetch->[0];
+		$sth->finish;
 	}
 
 	# no data found!
@@ -216,7 +217,7 @@ while(my( $id ) = $isth->fetchrow_array)
 	
 	if( defined($accession) )
 	{
-		$sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `id`=$id AND `field`='accession'");
+		$sth = $iar_dbh->prepare("SELECT `value` FROM `live` WHERE `id`=$id AND `field`='accession' LIMIT 1");
 		$sth->execute or die $!;
 		my( $roar_accession ) = $sth->fetchrow_array;
 		if( $accession < $roar_accession and $accession > 19900000000000 ) {
@@ -227,6 +228,10 @@ while(my( $id ) = $isth->fetchrow_array)
 	
 	$iar_dbh->do("UNLOCK TABLES");
 }
+
+# clean up the statement handle
+$isth->finish;
+undef $isth;
 
 $dbh->disconnect;
 $iar_dbh->disconnect;
