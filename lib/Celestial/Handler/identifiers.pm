@@ -89,8 +89,10 @@ sub page
 		push @values, $until;
 	}
 	if( $dataset ) {
+		my( $from, $to ) = split /-/, $dataset;
+		$to ||= $from;
 		push @logic, "`accession` >= ? AND `accession` < ? + INTERVAL 1 DAY";
-		push @values, $dataset, $dataset;
+		push @values, $from, $to;
 	}
 	if( defined $set ) {
 		push @logic, "`set` = $set";
@@ -554,7 +556,7 @@ sub body
 
 	my $total = 0;
 
-	if( $dataset )
+#	if( $dataset )
 	{
 		my $sth = $dbh->prepare("SELECT `id`,DATE_FORMAT(`accession`,'\%Y\%m\%d'),`identifier` FROM `$table`" . (@logic ? ' WHERE ' . join(' AND ', @logic) : '')); 
 		$sth->execute(@values);
@@ -614,9 +616,7 @@ sub body
 	}
 
 	$body->appendChild( dataElement( 'h2', 
-				$dataset ?
-				"$dataset - $total matching records" :
-				'No data set selected (click a bar on the graph)'
+				"$total matching records"
 				));
 	$body->appendChild( $summary );
 	$body->appendChild( $data );
@@ -839,7 +839,7 @@ sub power10_label
 		'10',
 		dataElement( 'tspan', $p, {
 			dy => -5,
-			'font-size' => '80%',
+			'font-size' => '8px',
 		})
 	];
 }
