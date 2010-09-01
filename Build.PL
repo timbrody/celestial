@@ -58,6 +58,7 @@ my $build = $class->new(
 		'MIME::Types' => '0.01',
 		'Date::Parse' => '0.01',
 		'DBD::mysql' => '0.01',
+		'YAML' => '0.01',
 	},
 	install_path => {
 		conf => '/etc/celestial',

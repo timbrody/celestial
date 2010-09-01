@@ -141,6 +141,12 @@ if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 
 $DEBUG = $opt_verbose;
 
+use HTTP::OAI::Debug;
+if( $opt_verbose > 1 )
+{
+	HTTP::OAI::Debug::level( '+' );
+}
+
 my $cfg  = Celestial::Config->new( $opt_cfg );
 
 my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
