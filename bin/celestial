@@ -757,10 +757,11 @@ sub timestamp {
 sub run_droid {
 	my $fn = shift;
 	my $tmp = File::Temp->new( UNLINK => 1 );
-	my $r = system("$JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn >/dev/null");
+	my $cmd = "$JAVA -jar $DROID -s $DROID_SIG -o $tmp -f XML -l=$fn";
+	my $r = system("$cmd >/dev/null");
 	if( $r != 0 )
 	{
-		die("Error running $JAVA -jar $DROID -S$DROID_SIG -O$tmp -FXML -L$fn: $?");
+		die("Error running $cmd: $?");
 	}
 	my $doc = XML::LibXML->new->parse_file("$tmp.xml");
 	unlink("$tmp.xml");
