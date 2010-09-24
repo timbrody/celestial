@@ -6,18 +6,7 @@ Celestial::FullText - Retrieve the full-text for an OAI record
 
   use Celestial::FullText;
 
-  my $ft = Celestial::FullText->new( $ha, identifier => $id );
-  my $ft = Celestial::FullText->new( $ha, record => $rec );
-
-	my $ft = Celestial::FullText->new(
-		$ha,
-		record => $rec
-	);
-
-  unless( $ft )
-  {
-  	warn "Unsupported repository type";
-  }
+  my $ft = Celestial::FullText->new( $dbh, harvestAgent => $ha );
 
   foreach my $file ($ft->formats)
   {
@@ -47,6 +36,7 @@ use URI;
 use HTTP::OAI;
 use HTTP::OAI::Metadata::OAI_DC;
 use HTTP::OAI::Metadata::METS;
+use Socket qw();
 
 use vars qw( $MAX_FILE_SIZE );
 
@@ -61,7 +51,7 @@ our %SERVER_TYPES = (
 
 # Preloaded methods go here.
 
-=item $ft = Celestial::FullText->new HARVEST_AGENT, RECORD
+=item $ft = Celestial::FullText->new( %options )
 
 Create a new FullText retrieval object using RECORD to determine what the type of repository is.
 
@@ -69,21 +59,14 @@ Create a new FullText retrieval object using RECORD to determine what the type o
 
 sub new
 {
-	my( $class, $ha, $rec ) = @_;
+	my( $class, %self ) = @_;
 
-	Carp::confess("Required record argument undefined")
-		unless( $rec );
-	Carp::confess("Record doesn't contain metadata")
-		unless( $rec->metadata );
+	my $self = bless \%self, $class;
 
-	my %self;
-	$self{ server_type } = guess_repository_type( $ha, $rec )
-		or return undef;
-
-	return bless {%self, ha => $ha}, $class;
+	return $self;
 }
 
-=item $st = Celestial::FullText::guess_repository_type HARVEST_AGENT, RECORD
+=item $st = $ft->guess_repository_type()
 
 Guess the repository type using HARVEST_AGENT and RECORD.
 
@@ -91,52 +74,51 @@ Guess the repository type using HARVEST_AGENT and RECORD.
 
 sub guess_repository_type
 {
-	my( $ha, $rec ) = @_;
+	my( $self ) = @_;
 	
-	Carp::confess( "Requires a record containing HTTP::OAI::Metadata::OAI_DC metadata" )
-		unless( $rec->metadata->isa( 'HTTP::OAI::Metadata::OAI_DC' ) );
+	return $self->{ server_type }
+		if exists $self->{ server_type };
 
-	my $ids = $rec->metadata->dc->{ identifier };
+	my $repo = $self->{repository};
+	my $dbh = $self->{dbh};
+	my $ha = $self->{harvestAgent};
 
 	{
 		my $uri = URI->new($ha->baseURL);
 		if( $uri->path eq '/perl/oai2' )
 		{
-			return "eprints";
+			return $self->{ server_type } = "eprints";
 		}
+		$uri->path( '/cgi/counter' );
+		my $r = $ha->get( $uri );
+		return $self->{ server_type } = "eprints"
+			if $r->is_success && $r->headers->content_type =~ /^text\/plain\b/;
 	}
 
-	foreach my $url (grep { /^https?:/ } @$ids)
+	foreach my $format ($repo->formats)
 	{
-		my $r = $ha->head( $url );
-		unless( $r->is_success ) {
-			warn sprintf("Error requesting [%s]: %s\n",
-				$url,
-				$r->message,
-			);
-			return;
-		}
-		next unless $r->content_type eq 'text/html' or $r->content_type eq 'text/xml';
-		$r = $ha->get( $url );
-		unless( $r->is_success ) {
-			warn sprintf("Error requesting [%s]: %s\n",
-				$url,
-				$r->message,
-			);
-			return;
-		}
-
-		my $ct = $r->content;
-		if( $ct =~ /\"metadataFieldLabel\"/ and $ct =~ /\"metadataFieldValue\"/ )
+		if( $format->{namespace} eq 'http://www.loc.gov/METS/' )
 		{
-			return "dspace";
+			return $self->{ server_type } = "mets";
 		}
 	}
 
-	return;
+	if( defined(my $host = $repo->parent) )
+	{
+		if( $host->is_set( "version" ) )
+		{
+			my $version = $host->value( "version" );
+			if( $self->can( "run_$version" ) )
+			{
+				return $self->{ server_type } = $host->value( "version" );
+			}
+		}
+	}
+
+	return $self->{ server_type } = undef;
 }
 
-=item @formats = $ft->formats RECORD
+=item @formats = $ft->formats( RECORDID )
 
 Return a list of formats for the given record.
 
@@ -144,25 +126,85 @@ Return a list of formats for the given record.
 
 sub formats
 {
-	my( $self, $rec ) = @_;
+	my( $self, $id ) = @_;
 
-	my $st = $self->{ server_type };
+	my $repo = $self->{repository};
+	my $dbh = $self->{dbh};
+	my $oai_dc = $repo->format( "oai_dc" );
 
-	# If we've been handed a METS record, use it
-	if( $rec->metadata->isa( 'HTTP::OAI::Metadata::METS' ))
-	{
-		$st = "mets";
-	}
+	my $st = $self->guess_repository_type();
+	return if !defined $st;
 
-	my $f = "_$st";
-	no strict "refs";
-	return $self->$f($rec);
+	my $f = "run_$st";
+	return $self->$f( $id );
 }
 
-sub _dspace
+sub get_oai_dc
 {
-	my( $self, $rec ) = @_;
-	my $ha = $self->{ ha };
+	my( $self, $id ) = @_;
+
+	my $oai_dc = $self->{repository}->format( "oai_dc" );
+	return if !$oai_dc;
+
+	my( $identifier,$datestamp,$metadata ) = $self->{dbh}->selectrow_array("SELECT identifier,datestamp,UNCOMPRESS(metadata) FROM ".$oai_dc->sql_table_name." WHERE recordid=?",{},$id);
+	return if !$metadata;
+
+	my $rec = HTTP::OAI::Record->new();
+	$rec->header->identifier( $identifier );
+	$rec->header->datestamp( $datestamp );
+
+	my $dc = HTTP::OAI::Metadata::OAI_DC->new();
+	XML::LibXML::SAX->new(
+		Handler => HTTP::OAI::SAXHandler->new( # Required to supply Text
+		Handler => $dc
+	))->parse_string( $metadata );
+	$rec->metadata( $dc );
+
+	return $rec;
+}
+
+sub get_mets
+{
+	my( $self, $id ) = @_;
+
+	my $oai_dc = $self->{repository}->format( "oai_dc" );
+	return if !$oai_dc;
+
+	my( $identifier ) = $self->{dbh}->selectrow_array("SELECT identifier FROM ".$oai_dc->sql_table_name." WHERE recordid=?",{},$id);
+	return if !$identifier;
+
+	my $prefix;
+	for($self->{repository}->formats)
+	{
+		if( $_->{namespace} eq 'http://www.loc.gov/METS/' )
+		{
+			$prefix = $_->{prefix};
+			last;
+		}
+	}
+	return if !$prefix;
+
+	my $r = $self->{harvestAgent}->GetRecord(
+		metadataPrefix => $prefix,
+		identifier => $identifier,
+		handlers => {
+			metadata => 'HTTP::OAI::Metadata::METS',
+		},
+	);
+	return if !$r->is_success;
+
+	return $r->next;
+}
+
+sub run_dspace
+{
+	my( $self, $id ) = @_;
+
+	my $ha = $self->{harvestAgent};
+
+	my $rec = $self->get_oai_dc( $id );
+	return if !$rec;
+
 	my @fmts;
 	my( $jo_url ) = grep { /^https?:\/\// } @{$rec->metadata->dc->{ identifier }};
 	if( !defined $jo_url )
@@ -192,7 +234,7 @@ warn "GET $jo_url\n" if $DEBUG;
 
 	while(my( $u, $uri ) = each %urls )
 	{
-		if( my $fmt = Celestial::FullText::Format->new( $ha, $uri ) ) {
+		if( my $fmt = Celestial::FullText::Format->new( $self, $uri ) ) {
 			push @fmts, $fmt;
 		} else {
 			warn sprintf("Error requesting [%s], ignored\n", $uri);
@@ -202,36 +244,70 @@ warn "GET $jo_url\n" if $DEBUG;
 	return @fmts;
 }
 
-sub _eprints
+sub run_eprints
 {
-	my( $self, $rec ) = @_;
-	my $ha = $self->{ ha };
+	my( $self, $id ) = @_;
+
 	my @fmts;
-	my @urls;
-	push @urls, @{$rec->metadata->dc->{ identifier }};
-	push @urls, @{$rec->metadata->dc->{ format }};
-	push @urls, @{$rec->metadata->dc->{ relation }};
+
+	my $ha = $self->{harvestAgent};
+
+	my $rec = $self->get_oai_dc( $id );
+	warn "Failed to retrieve oai_dc"
+		if !$rec && $DEBUG;
+	return if !$rec;
+
 	my $bu = URI->new($ha->baseURL)->canonical;
 	$bu->path('');
-	for(@urls)
+
+	# we only want to download files from the same host as the PMH interface,
+	# otherwise we could end up retrieving publisher versions etc.
+	my @addresses = gethostbyname( $bu->host );
+	my %samehost = map { $_ => 1 }
+		(
+			split(/ /, $addresses[1]),
+			map { Socket::inet_ntoa($_) } @addresses[4..$#addresses]
+		);
+
+	my @urls;
+	for(
+		@{$rec->metadata->dc->{ identifier }},
+		@{$rec->metadata->dc->{ format }},
+		@{$rec->metadata->dc->{ relation }}
+		)
 	{
 		my ($fmt,$url) = split / /, $_;
-		$_ = $url ? $url : $fmt;
-		next unless $_ =~ /^https?:/;
-		my $u = URI->new($_);
-		$_ = '' unless $u->host eq $bu->host and $u->path =~ m#^/\d+/\d+/|/archive/\d+/\d+/#;
+		$url = $fmt if !$url;
+		next if $url !~ /^https?:/;
+		my $u = URI->new($url);
+		next if !$u->host;
+		if( !exists $samehost{$u->host} )
+		{
+			my $ip = Socket::inet_ntoa((gethostbyname($u->host))[4]);
+			$samehost{$u->host} = $samehost{$ip};
+		}
+		next unless
+			$samehost{$u->host} and
+			$u->path =~ m#^/\d+/\d+/|/archive/\d+/\d+/#;
+		push @urls, $url;
 	}
-	@urls = grep { /^https?:/ } @urls;
-	return grep { defined $_ } map { Celestial::FullText::Format->new( $ha, $_ ) } @urls;
+
+	return
+		grep { defined $_ }
+		map { Celestial::FullText::Format->new( $self, $_ ) } @urls;
 }
 
-sub _mets
+sub run_mets
 {
-	my( $self, $rec ) = @_;
-	my $ha = $self->{ ha };
+	my( $self, $id ) = @_;
+
+	my $ha = $self->{ harvestAgent };
 
 	my $bu = URI->new($ha->baseURL)->canonical;
 	$bu->path('');
+
+	my $rec = $self->get_mets( $id );
+	return if !$rec;
 
 	my @urls;
 	for($rec->metadata->files)
@@ -244,7 +320,9 @@ sub _mets
 		warn $rec->identifier . " - METS - didn't contain any URLs";
 	}
 
-	return grep { defined $_ } map { Celestial::FullText::Format->new( $ha, $_ ) } @urls;
+	return
+		grep { defined $_ }
+		map { Celestial::FullText::Format->new( $self, $_ ) } @urls;
 }
 
 package Celestial::FullText::Format;
@@ -258,30 +336,33 @@ our $TMPFILE_SIZE = 0;
 
 sub new
 {
-	my( $class, $ua, $url ) = @_;
+	my( $class, $ft, $url ) = @_;
+
+	my $self = bless {
+		ft => $ft,
+		url => $url,
+		harvestAgent => $ft->{harvestAgent},
+	}, $class;
+
 warn "HEAD $url\n" if $DEBUG;
-	my $r = $ua->head( $url );
-	unless( $r->is_success ) {
-		warn "Error requesting [$url]: " . $r->message . "\n";
+	my $r = $self->{harvestAgent}->head( $url );
+	if( !$r->is_success ) {
+		warn "Error requesting [$url]: " . $r->message . "\n"
+			if $DEBUG;
 		return undef;
 	}
-	my $mt = MIME::Types->new->type( $r->header( 'Content-Type' )) || $r->header( 'Content-Type' );
-	my $date = $r->headers->header( 'Last-Modified' );
-	my $cl = $r->headers->header("Content-Length");
-	return bless {
-		ha => $ua,
-		url => $url,
-		date => $date,
-		mt => $mt,
-		size => $cl,
-	}, ref($class) || $class;
+	$self->{mt} = MIME::Types->new->type( $r->header( 'Content-Type' )) || $r->header( 'Content-Type' );
+	$self->{date} = $r->headers->header( 'Last-Modified' );
+	$self->{size} = $r->headers->header("Content-Length");
+
+	return $self;
 }
 
 sub _get
 {
 	my $self = shift;
 	my $ext = '';
-	if( $self->url =~ m#[^/](\.\w{2,5})$# )
+	if( $self->url =~ m# [^/](\.\w{2,5})$ #x )
 	{
 		$ext = $1;
 	}
@@ -294,7 +375,10 @@ sub _get
 	binmode($TMPFILE);
 	$TMPFILE_SIZE = 0;
 warn "GET ".$self->url."\n" if $DEBUG;
-	return $self->{ ha }->get( $self->url, ':content_cb' => \&Celestial::FullText::Format::_lwpcallback );
+
+	return $self->{ harvestAgent }->get( $self->url,
+		':content_cb' => \&Celestial::FullText::Format::_lwpcallback
+	);
 }
 
 sub _lwpcallback

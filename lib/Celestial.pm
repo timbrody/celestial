@@ -20,3 +20,4 @@ use Celestial::Config;
 use Celestial::DBI;
 use Celestial::FullText;
 use Celestial::CGI;
+use Celestial::Schema;

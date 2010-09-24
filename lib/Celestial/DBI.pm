@@ -237,7 +237,8 @@ sub AUTOLOAD {
 	$AUTOLOAD =~ s/^.*:://;
 #	warn "${self}::$AUTOLOAD(".join(',',@_).")\n";
 	RETRY:
-#	local $dbh->{RaiseError} = 0;
+	local $dbh->{RaiseError};
+	local $dbh->{PrintError};
 	my @r = $dbh->$AUTOLOAD(@_);
 	if( defined $dbh->err ) {
 		if( $dbh->errstr =~ /MySQL server has gone away/ ) {
@@ -248,7 +249,7 @@ sub AUTOLOAD {
 				Carp::confess "Could not reconnect to MySQL server after $AUTOLOAD() call\n";
 			}
 		}
-		Carp::confess "Fatal database error: ".$dbh->errstr."\n";
+		Carp::croak "Fatal database error: ".$dbh->errstr;
 	}
 	return wantarray ? @r : $r[0];
 }
