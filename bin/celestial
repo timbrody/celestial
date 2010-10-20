@@ -73,6 +73,7 @@ Be more verbose.
 
 use Carp;
 use EPrints qw( no_check_user );
+use HTML::Entities;
 
 use strict;
 use warnings;
@@ -183,6 +184,14 @@ if( $opt_list ) {
 }
 
 my %CHILDREN;
+
+$SIG{'USR2'} = sub {
+	print "(parent) Waiting for following harvesters to finish (pid/identifier):\n";
+
+	while( my ($pid,$repo) = each %CHILDREN ) {
+		printf("\t%d\t%s\n", $pid, $repo->id);
+	}
+};
 
 my @repos = $roar->dataset( "celestial" )->search->slice;
 
@@ -450,7 +459,7 @@ sub update_repository {
 		my $message = {
 			timestamp => EPrints::Time::get_iso_timestamp(),
 			type => "error",
-			message => $last_error,
+			message => HTML::Entities::encode_entities( $last_error ),
 		};
 		my $msgs = EPrints::Utils::clone( $repo->value( "messages" ) );
 		push @$msgs, $message;
@@ -469,14 +478,25 @@ sub update_repository {
 		}
 		$repo->set_value( "formats", $mdfs );
 
-		my $ok = harvest_Fulltext( $dbh,
+		my $ok = eval { harvest_Fulltext( $dbh,
 			harvestAgent => $ha,
 			repository => $repo,
 			from => ($opt_allfulltext ? undef : $latest_harvest)
-		);
+		) };
 
-		# clear error messages
-		$repo->set_value( "messages", [] );
+		if( $@ )
+		{
+			$repo->set_value( "messages", [{
+				timestamp => EPrints::Time::get_iso_timestamp(),
+				type => "error",
+				message => HTML::Entities::encode_entities($@),
+			}] );
+		}
+		else
+		{
+			# clear error messages
+			$repo->set_value( "messages", [] );
+		}
 
 		warn "(".$repo->id.") finished harvest started at $latest_harvest\n"
 			if $opt_verbose;
@@ -516,8 +536,8 @@ sub harvest_ListRecords {
 
 	my $spec_table = "set_".$repo->id;
 
-	my $sth_exists = $dbh->prepare("SELECT recordid FROM $table WHERE identifier=?");
-	my $sth_set_lookup = $dbh->prepare("SELECT setid FROM $spec_table WHERE spec=?");
+	my $sth_exists = $dbh->prepare("SELECT recordid FROM $table WHERE identifier_md5=MD5(?)");
+	my $sth_set_lookup = $dbh->prepare("SELECT setid FROM $spec_table WHERE spec_md5=MD5(?)");
 
 	my $cb = sub {
 		my( $rec ) = @_;
@@ -578,12 +598,13 @@ sub harvest_ListRecords {
 
 		if( !defined $from )
 		{
-			$dbh->do("INSERT INTO $tmp_table (recordid) VALUES ($id)");
+			$dbh->do("INSERT IGNORE INTO $tmp_table (recordid) VALUES ($id)");
 		}
 
 		$dbh->do("DELETE FROM $set_table WHERE recordid=$id");
 		foreach my $spec ($rec->header->setSpec)
 		{
+			next if !defined $spec;
 			my @parts = grep { length($_) } split /:/, $spec;
 			foreach my $i (0..$#parts)
 			{
@@ -602,7 +623,7 @@ sub harvest_ListRecords {
 		$ha->ListRecords(
 			force=>1, # Force bad metadata prefixes
 			metadataPrefix=>$mdf->{prefix},
-			from=>$from,
+			from=>datestamp($from, $GRANULARITY == WITH_SECONDS),
 			set=>$set,
 			onRecord => $cb,
 		);
@@ -784,7 +805,7 @@ sub harvest_Fulltext
 	my $sth;
 	if( $from )
 	{
-		$sth = $dbh->prepare("SELECT recordid,identifier FROM record_".$repo->id."_oai_dc WHERE datestamp>=?");
+		$sth = $dbh->prepare("SELECT recordid,identifier,accession FROM record_".$repo->id."_oai_dc WHERE datestamp>=?");
 		$sth->execute( $from );
 	}
 	else

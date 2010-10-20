@@ -307,7 +307,7 @@ sub run_mets
 	$bu->path('');
 
 	my $rec = $self->get_mets( $id );
-	return if !$rec;
+	return if !$rec || !$rec->metadata;
 
 	my @urls;
 	for($rec->metadata->files)

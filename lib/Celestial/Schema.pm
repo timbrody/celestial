@@ -17,7 +17,7 @@ $SET_RECORD = qq{
 	(
 	setid INT UNSIGNED NOT NULL,
 	recordid INT UNSIGNED NOT NULL,
-	PRIMARY KEY(setid,recordid)
+	PRIMARY KEY(recordid,setid)
 	)
 	DEFAULT CHARACTER SET utf8 COLLATE utf8_bin
 };
