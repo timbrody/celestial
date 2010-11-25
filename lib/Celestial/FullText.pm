@@ -283,8 +283,11 @@ sub run_eprints
 		next if !$u->host;
 		if( !exists $samehost{$u->host} )
 		{
-			my $ip = Socket::inet_ntoa((gethostbyname($u->host))[4]);
-			$samehost{$u->host} = $samehost{$ip};
+			if( my $packed_ip = gethostbyname($u->host) )
+			{
+				my $ip = Socket::inet_ntoa($packed_ip);
+				$samehost{$u->host} = $samehost{$ip};
+			}
 		}
 		next unless
 			$samehost{$u->host} and

@@ -222,7 +222,7 @@ foreach my $repo (@repos)
 	# child
 	else
 	{
-		$0 = "celestial-harvest-child";
+		$0 = "celestial-harvest-".$repo->id;
 
 		# reconnect to the databases after forking
 		$roar->get_database->connect;
@@ -652,7 +652,7 @@ sub harvest_ListRecords {
 		}
 	}
 
-	$mdf->{cardinality} = $dbh->selectall_arrayref("SELECT COUNT(*) FROM $table WHERE status is Null")->[0]->[0];
+#	$mdf->{cardinality} = $dbh->selectall_arrayref("SELECT COUNT(*) FROM $table WHERE status is Null")->[0]->[0];
 
 	(undef,undef,undef);
 }
@@ -946,7 +946,7 @@ sub timestamp {
 sub run_droid {
 	my $fn = shift;
 	my $tmp = File::Temp->new( UNLINK => 1 );
-	my $cmd = "$JAVA -jar $DROID -s $DROID_SIG -o $tmp -f XML -l=$fn";
+	my $cmd = "$JAVA -ms20m -jar $DROID -s $DROID_SIG -o $tmp -f XML -l=$fn";
 	my $r = system("$cmd >/dev/null 2>&1");
 	if( $r != 0 )
 	{
