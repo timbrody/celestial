@@ -429,7 +429,7 @@ sub file
 {
 	my $self = shift;
 	unless( defined($self->{ fh }) ) {
-		my $r = self->_get();
+		my $r = $self->_get();
 		unless( $r->is_success ) {
 			if( $r->header('X-Died') ) {
 				if( $r->header('X-Died') =~ /^toobig/ ) {

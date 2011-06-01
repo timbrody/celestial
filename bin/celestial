@@ -840,7 +840,7 @@ sub harvest_Fulltext
 			my $url = $fmt->url;
 			my $ct = $fmt->mime_type;
 			my @types;
-			eval { @types = run_droid( "$fmt" ) };
+			eval { @types = run_file( "$fmt" ) };
 			if( $@ )
 			{
 				warn sprintf("There was a problem running droid for %s (%s): %s\n", $identifier, $fmt, $@);
@@ -941,6 +941,22 @@ sub timestamp {
 	} else {
 		die "Cannot extract timestamp from $ts";
 	}
+}
+
+sub run_file {
+	my( $fn ) = @_;
+
+	my $type = `file -bz $fn`; # brief, look-inside compressed
+	chomp($type);
+
+	return () if !$type;
+	
+	$type =~ s/\(.+$//; # strip commentary
+	$type =~ s/^(CDF V2 Document).*/$1/; # CDFs contain detailed info, not just type :-(
+
+	my $type_id = "file:".Digest::MD5::md5_base64( $type );
+
+	return [ $type_id, $type ];
 }
 
 sub run_droid {
