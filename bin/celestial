@@ -78,6 +78,8 @@ use HTML::Entities;
 use strict;
 use warnings;
 use encoding 'utf8';
+use FindBin;
+use lib "$FindBin::Bin/../lib";
 
 binmode(STDOUT,":utf8");
 
@@ -306,6 +308,17 @@ sub update_repository {
 	$ha->agent("Celestial/$VERSION");
 	$ha->timeout($HTTP_TIMEOUT);
 	$ha->from($adminEmail);
+	{ # scopy $stime
+		my $stime;
+		$ha->delay(sub {
+			no warnings; # last time and stime will be undefined
+			my $wait = $_[0] - $stime;
+			$stime = time();
+			$wait = .5 if $wait < .5;
+			$wait = 60 if $wait > 60;
+			return $wait;
+		});
+	}
 	my $identify = $ha->Identify;
 	if( $identify->is_error ) {
 		my $lastError = "(" . $repo->id . ") Unable to get Identify: " . $identify->code . " (" . $identify->message . ")\n";
@@ -861,10 +874,11 @@ sub harvest_Fulltext
 				);
 			}
 		}
-
-		sleep(rand(5)); # Pause for at least a few seconds between records
 	}
 	$sth->finish;
+
+	warn "[".$repo->id."] full-text harvest finished\n"
+		if $opt_verbose;
 
 	return $ft;
 }
