@@ -608,6 +608,9 @@ sub harvest_ListRecords {
 			);
 			$id = $sth->{'mysql_insertid'}
 				or die "missing mysql_insertid";
+
+			$mdf->{cardinality}++;
+			$mdf->commit if ($mdf->{cardinality} % 100) == 0;
 		}
 
 		if( !defined $from )
@@ -641,6 +644,8 @@ sub harvest_ListRecords {
 			set=>$set,
 			onRecord => $cb,
 		);
+
+	$mdf->commit; # update cardinality
 
 	if( $lr->is_error ) {
 		# save the resumptionToken
