@@ -313,10 +313,11 @@ sub update_repository {
 		$ha->delay(sub {
 			no warnings; # last time and stime will be undefined
 			my $wait = $_[0] - $stime;
-			$stime = time();
 			$wait = .5 if $wait < .5;
 			$wait = 60 if $wait > 60;
-			return $wait;
+			select(undef,undef,undef,$wait);
+			$stime = time();
+			return 0;
 		});
 	}
 	my $identify = $ha->Identify;
@@ -472,7 +473,7 @@ sub update_repository {
 		my $message = {
 			timestamp => EPrints::Time::get_iso_timestamp(),
 			type => "error",
-			message => HTML::Entities::encode_entities( $last_error ),
+			message => HTML::Entities::encode_entities( "$last_error - $last_url" ),
 		};
 		my $msgs = EPrints::Utils::clone( $repo->value( "messages" ) );
 		push @$msgs, $message;
@@ -642,6 +643,18 @@ sub harvest_ListRecords {
 		);
 
 	if( $lr->is_error ) {
+		# save the resumptionToken
+		my $token2;
+		if(
+			$lr->can( "resumptionToken" ) &&
+			defined($token2 = $lr->resumptionToken) &&
+			defined($token2 = $token2->resumptionToken) &&
+			( !defined $token || $token ne $token2 )
+		  )
+		{
+			$mdf->{token} = $token2;
+			$mdf->commit;
+		}
 		return(
 			($lr->request ? $lr->request->uri : 'Unknown URI!'),
 			"(" . $repo->id . "/". $mdf->{prefix} . ") Error requesting ListRecords: " . $lr->code . " (" . $lr->message . ")\n",
@@ -967,6 +980,7 @@ sub run_file {
 	
 	$type =~ s/\(.+$//; # strip commentary
 	$type =~ s/^(CDF V2 Document).*/$1/; # CDFs contain detailed info, not just type :-(
+	$type =~ s/^.*(HTML document).*/$1/; # as do HTML documents
 
 	my $type_id = "file:".Digest::MD5::md5_base64( $type );
 
