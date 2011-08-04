@@ -74,6 +74,7 @@ Be more verbose.
 use Carp;
 use EPrints qw( no_check_user );
 use HTML::Entities;
+use POSIX 'setsid';
 
 use strict;
 use warnings;
@@ -120,7 +121,7 @@ use constant {
 our $opt_verbose;
 our $opt_identifier;
 our $opt_missing;
-my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun, $opt_allfulltext, $opt_migrate, $opt_all );
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun, $opt_allfulltext, $opt_migrate, $opt_all, $opt_daemon );
 $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
@@ -141,6 +142,7 @@ GetOptions(
 	'allfulltext' => \$opt_allfulltext,
 	'migrate' => \$opt_migrate,
 	'all' => \$opt_all,
+	'daemon' => \$opt_daemon,
 ) or pod2usage("Invalid argument");
 
 pod2usage(1) if $opt_help;
@@ -150,6 +152,15 @@ if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 }
 
 $DEBUG = $opt_verbose;
+
+if( $opt_daemon )
+{
+	exit if fork();
+	chdir('/');
+	setsid();
+	open(STDOUT, ">", "/tmp/celestial.log") or die "Error writing to log";
+	open(STDERR, ">>", "/tmp/celestial.log") or die "Error writing to log";
+}
 
 use HTTP::OAI::Debug;
 if( $opt_verbose > 2 )
@@ -553,10 +564,33 @@ sub harvest_ListRecords {
 	my $sth_exists = $dbh->prepare("SELECT recordid FROM $table WHERE identifier_md5=MD5(?)");
 	my $sth_set_lookup = $dbh->prepare("SELECT setid FROM $spec_table WHERE spec_md5=MD5(?)");
 
+	my $progressid = "celestial:".$repo->id.":".$mdf->{prefix};
+
+	my $progress =  $roar->dataset( "upload_progress" )->dataobj( $progressid );
+	if( !defined $progress )
+	{
+		$progress = $roar->dataset( "upload_progress" )->create_dataobj({
+			progressid => $progressid,
+		});
+	}
+
+	$progress->set_value( "expires", time() + 86400 );
+	$progress->set_value( "size", 0 );
+	$progress->set_value( "received", 0 );
+	$progress->commit;
+
 	my $cb = sub {
-		my( $rec ) = @_;
+		my( $rec, $lr ) = @_;
 		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
 		return if $opt_dryrun;
+
+		if( $lr->resumptionToken )
+		{
+			$progress->set_value( "size", $lr->resumptionToken->completeListSize || 0 );
+		}
+		$progress->set_value( "received", $progress->value( "received" ) + 1 );
+		$progress->set_value( "expires", time() + 86400 );
+		$progress->commit if $progress->value( "received" ) % 100 == 0;
 
 		my $accession = $rec->datestamp;
 		$accession = $dbh->now() if !$accession;
@@ -645,6 +679,7 @@ sub harvest_ListRecords {
 			onRecord => $cb,
 		);
 
+	$progress->remove;
 	$mdf->commit; # update cardinality
 
 	if( $lr->is_error ) {
