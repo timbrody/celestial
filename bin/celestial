@@ -331,6 +331,9 @@ sub update_repository {
 			return 0;
 		});
 	}
+
+	$repo->set_status( "Identify" ); $repo->commit;
+
 	my $identify = $ha->Identify;
 	if( $identify->is_error ) {
 		my $lastError = "(" . $repo->id . ") Unable to get Identify: " . $identify->code . " (" . $identify->message . ")\n";
@@ -368,6 +371,8 @@ sub update_repository {
 	$dbh->do("DROP TABLE IF EXISTS $new_table");
 	$dbh->do("CREATE TABLE $new_table $Celestial::Schema::SET");
 
+	$repo->set_status( "ListSets" ); $repo->commit;
+
 	my $ls = $ha->ListSets();
 	while( my $set = $ls->next ) {
 		$dbh->do("INSERT IGNORE $new_table (spec,spec_md5,name) VALUES (?,MD5(?),?)",{},
@@ -387,6 +392,8 @@ sub update_repository {
 		$dbh->do("RENAME TABLE $table TO $old_table, $new_table TO $table");
 		$dbh->do("DROP TABLE $old_table");
 	}
+
+	$repo->set_status( "ListMetadataFormats" ); $repo->commit;
 
 	my $lmdf = $ha->ListMetadataFormats();
 	if( $lmdf->is_error ) {
@@ -471,6 +478,8 @@ sub update_repository {
 
 	my $latest_harvest = EPrints::Time::get_iso_timestamp();
 
+	$repo->set_status( "ListRecords" ); $repo->commit;
+
 	my( $last_url, $last_error, $last_response ) = &$harvest_func($dbh,
 		harvestAgent => $ha,
 		repository => $repo,
@@ -481,15 +490,11 @@ sub update_repository {
 
 	if( $last_error )
 	{
-		my $message = {
-			timestamp => EPrints::Time::get_iso_timestamp(),
-			type => "error",
-			message => HTML::Entities::encode_entities( "$last_error - $last_url" ),
-		};
-		my $msgs = EPrints::Utils::clone( $repo->value( "messages" ) );
-		push @$msgs, $message;
-		$repo->set_value( "messages", $msgs );
-		warn "(".$repo->id.") Error in harvest: $message->{message}\n"
+		my $message = "$last_error - $last_url";
+		$repo->add_message( "error", $repo->{session}->xml->create_text_node(
+			$message
+		) );
+		warn "(".$repo->id.") Error in harvest: $message\n"
 			if $opt_verbose;
 	}
 	else
@@ -509,18 +514,14 @@ sub update_repository {
 			from => ($opt_allfulltext ? undef : $latest_harvest)
 		) };
 
+		# clear error messages
+		$repo->set_value( "messages", [] );
+
 		if( $@ )
 		{
-			$repo->set_value( "messages", [{
-				timestamp => EPrints::Time::get_iso_timestamp(),
-				type => "error",
-				message => HTML::Entities::encode_entities($@),
-			}] );
-		}
-		else
-		{
-			# clear error messages
-			$repo->set_value( "messages", [] );
+			$repo->add_message( "error", $repo->{session}->xml->create_text_node(
+				$@
+			) );
 		}
 
 		warn "(".$repo->id.") finished harvest started at $latest_harvest\n"
@@ -581,6 +582,9 @@ sub harvest_ListRecords {
 
 	my $cb = sub {
 		my( $rec, $lr ) = @_;
+
+		$repo->set_status( $lr->request ? "".$lr->request->uri : "Unknown URI" ); $repo->commit;
+
 		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
 		return if $opt_dryrun;
 
