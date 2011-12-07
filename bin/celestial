@@ -336,14 +336,13 @@ sub update_repository {
 
 	my $identify = $ha->Identify;
 	if( $identify->is_error ) {
-		my $lastError = "(" . $repo->id . ") Unable to get Identify: " . $identify->code . " (" . $identify->message . ")\n";
-		warn($lastError . $identify->request->uri . "\n")
-			if $opt_verbose;
-#		$dbh->addRepositoryError($repo,
-#			$identify->request->uri,
-#			$lastError,
-#			$identify->toDOM->toString,
-#		);
+		my $message = "Unable to get Identify: " . $identify->code . " (" . $identify->message . ")\n".$identify->request->uri;
+		warn "[" . $repo->id . "] " . $message if $opt_verbose;
+		$repo->set_value( "messages", [] );
+		$repo->add_message( "error", $repo->{session}->xml->create_text_node(
+			$message
+		) );
+		$repo->commit;
 		return;
 	}
 	$ha->repository->version( $identify->version );
