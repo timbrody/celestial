@@ -495,6 +495,7 @@ sub update_repository {
 		) );
 		warn "(".$repo->id.") Error in harvest: $message\n"
 			if $opt_verbose;
+		$repo->commit();
 	}
 	else
 	{
@@ -506,6 +507,7 @@ sub update_repository {
 			$_ = $oai_dc if $_->{prefix} eq 'oai_dc';
 		}
 		$repo->set_value( "formats", $mdfs );
+		$repo->commit();
 
 		my $ok = eval { harvest_Fulltext( $dbh,
 			harvestAgent => $ha,
@@ -525,9 +527,9 @@ sub update_repository {
 
 		warn "(".$repo->id.") finished harvest started at $latest_harvest\n"
 			if $opt_verbose;
-	}
 
-	$repo->commit();
+		$repo->commit();
+	}
 
 	1;
 }
@@ -669,6 +671,8 @@ sub harvest_ListRecords {
 			}
 		}
 	};
+
+	WITHOUT_TOKEN:
 	my $lr = defined($token) ? 
 		$ha->ListRecords(
 			resumptionToken=>$token,
@@ -683,19 +687,22 @@ sub harvest_ListRecords {
 		);
 
 	$progress->remove;
+	$mdf->{token} = undef;
 	$mdf->commit; # update cardinality
 
 	if( $lr->is_error ) {
-		# save the resumptionToken
-		my $token2;
-		if(
-			$lr->can( "resumptionToken" ) &&
-			defined($token2 = $lr->resumptionToken) &&
-			defined($token2 = $token2->resumptionToken) &&
-			( !defined $token || $token ne $token2 )
-		  )
+		# $lr may be an HTTP::Response
+		my $error = eval { ($lr->errors)[0] };
+		if( defined($error) && $error->code eq "badResumptionToken" )
 		{
-			$mdf->{token} = $token2;
+			undef $token;
+			goto WITHOUT_TOKEN;
+		}
+		# save the resumptionToken
+		my $ctoken = eval { $lr->resumptionToken->resumptionToken };
+		if( defined $ctoken && ( !defined $token || $token ne $ctoken ) )
+		{
+			$mdf->{token} = $ctoken;
 			$mdf->commit;
 		}
 		return(
@@ -856,6 +863,8 @@ sub harvest_Fulltext
 	return unless $opt_fulltext;
 	my( $dbh, %args ) = @_;
 	my( $ha, $repo, $from ) = @args{qw( harvestAgent repository from )};
+
+	$repo->set_status( "Fulltext" ); $repo->commit;
 
 	my $pronom_table = $repo->sql_pronom_table_name;
 	my $table = $repo->sql_fulltext_table_name;
