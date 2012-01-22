@@ -547,6 +547,8 @@ sub harvest_ListRecords {
 
 	my $tmp_table = "listrecords_$$";
 
+	# for full harvests, keep a note of new records so we can remove records
+	# that no longer exist
 	if( !defined $from )
 	{
 		$dbh->do("DROP TEMPORARY TABLE IF EXISTS $tmp_table");
@@ -566,36 +568,17 @@ sub harvest_ListRecords {
 	my $sth_exists = $dbh->prepare("SELECT recordid FROM $table WHERE identifier_md5=MD5(?)");
 	my $sth_set_lookup = $dbh->prepare("SELECT setid FROM $spec_table WHERE spec_md5=MD5(?)");
 
-	my $progressid = "celestial:".$repo->id.":".$mdf->{prefix};
-
-	my $progress =  $roar->dataset( "upload_progress" )->dataobj( $progressid );
-	if( !defined $progress )
-	{
-		$progress = $roar->dataset( "upload_progress" )->create_dataobj({
-			progressid => $progressid,
-		});
-	}
-
-	$progress->set_value( "expires", time() + 86400 );
-	$progress->set_value( "size", 0 );
-	$progress->set_value( "received", 0 );
-	$progress->commit;
+	# update/initialize the cardinality
+	$mdf->{cardinality} = $dbh->selectall_arrayref("SELECT COUNT(*) FROM $table WHERE status is Null")->[0]->[0];
+	$mdf->commit;
 
 	my $cb = sub {
 		my( $rec, $lr ) = @_;
 
-		$repo->set_status( $lr->request ? "".$lr->request->uri : "Unknown URI" ); $repo->commit;
+		$repo->set_status( $lr->request ? "".$lr->request->uri." [".$rec->identifier."]" : "Unknown URI" ); $repo->commit;
 
 		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
 		return if $opt_dryrun;
-
-		if( $lr->resumptionToken )
-		{
-			$progress->set_value( "size", $lr->resumptionToken->completeListSize || 0 );
-		}
-		$progress->set_value( "received", $progress->value( "received" ) + 1 );
-		$progress->set_value( "expires", time() + 86400 );
-		$progress->commit if $progress->value( "received" ) % 100 == 0;
 
 		my $accession = $rec->datestamp;
 		$accession = $dbh->now() if !$accession;
@@ -649,7 +632,7 @@ sub harvest_ListRecords {
 				or die "missing mysql_insertid";
 
 			$mdf->{cardinality}++;
-			$mdf->commit if ($mdf->{cardinality} % 100) == 0;
+			$mdf->commit;
 		}
 
 		if( !defined $from )
@@ -686,14 +669,13 @@ sub harvest_ListRecords {
 			onRecord => $cb,
 		);
 
-	$progress->remove;
 	$mdf->{token} = undef;
 	$mdf->commit; # update cardinality
 
 	if( $lr->is_error ) {
 		# $lr may be an HTTP::Response
 		my $error = eval { ($lr->errors)[0] };
-		if( defined($error) && $error->code eq "badResumptionToken" )
+		if( defined($token) && defined($error) && $error->code eq "badResumptionToken" )
 		{
 			undef $token;
 			goto WITHOUT_TOKEN;
@@ -719,6 +701,7 @@ sub harvest_ListRecords {
 		$sth->execute;
 		while(my ($id) = $sth->fetchrow_array)
 		{
+			$mdf->{cardinality}--;
 			delete_record( 
 				repository => $repo,
 				oai_dc => $mdf,
@@ -726,9 +709,8 @@ sub harvest_ListRecords {
 				id => $id
 			);
 		}
+		$mdf->commit;
 	}
-
-#	$mdf->{cardinality} = $dbh->selectall_arrayref("SELECT COUNT(*) FROM $table WHERE status is Null")->[0]->[0];
 
 	(undef,undef,undef);
 }
