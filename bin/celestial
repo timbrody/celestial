@@ -126,6 +126,7 @@ $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
 $opt_fulltext = 1;
+$opt_daemon = 0;
 
 GetOptions(
 	'verbose+' => \$opt_verbose,
@@ -142,7 +143,7 @@ GetOptions(
 	'allfulltext' => \$opt_allfulltext,
 	'migrate' => \$opt_migrate,
 	'all' => \$opt_all,
-	'daemon' => \$opt_daemon,
+	'daemon!' => \$opt_daemon,
 ) or pod2usage("Invalid argument");
 
 pod2usage(1) if $opt_help;
@@ -158,8 +159,8 @@ if( $opt_daemon )
 	exit if fork();
 	chdir('/');
 	setsid();
-	open(STDOUT, ">", "/tmp/celestial.log") or die "Error writing to log";
-	open(STDERR, ">>", "/tmp/celestial.log") or die "Error writing to log";
+	open(STDOUT, ">", "/tmp/celestial.log") or die "Error writing to log: $!";
+	open(STDERR, ">>", "/tmp/celestial.log") or die "Error writing to log: $!";
 }
 
 use HTTP::OAI::Debug;
@@ -168,14 +169,23 @@ if( $opt_verbose > 2 )
 	HTTP::OAI::Debug::level( '+' );
 }
 
-my $roar = EPrints->new->repository( "roar" );
+our $roar = EPrints->new->repository( "roar", noise => $opt_verbose );
 
 my $cfg  = Celestial::Config->new( $opt_cfg );
 
-my $dbh = Celestial::DBI->connect() or die "Unable to connect to database: $!";
+$roar->{config}->{celestial}->{database} = {
+	name => "celestial",
+	host => "goliath-dmz",
+	user => "oaia",
+	pass => undef,
+};
 
-$ADMINEMAIL = $dbh->adminEmail or die "No adminEmail configured (required to harvest)\n";
-$MAX_HARVESTERS = $dbh->maxHarvesters || 10;
+use EPrints::Database::Celestial;
+our $db = EPrints::Database::Celestial->new( $roar )
+	or die "Unable to connect to database: $DBI::errstr";
+
+$ADMINEMAIL = $roar->config( "adminemail" ) or die "adminemail required to harvest\n";
+$MAX_HARVESTERS = $roar->config( "celestial", "threads" ) || 10;
 
 $JAVA = $cfg->get_conf( "java" ) || $JAVA;
 $DROID = $cfg->get_conf( "droid", "jar" ) || $DROID;
@@ -224,6 +234,12 @@ foreach my $repo (@repos)
 		print "(parent) [" . $r->id . "] $pid finished\n" if $opt_verbose;
 	}
 
+	goto NOFORK if !$opt_fork;
+
+	$roar->get_database->{dbh}->{InactiveDestroy} = $db->{dbh}->{InactiveDestroy} = 0;
+	# clear CachedKids otherwise DBI will just reconnect to our sockets (bad)
+	%{$roar->get_database->{dbh}->{Driver}->{CachedKids}} = ();
+
 	my $pid = fork();
 	die "fork failed: $!" if !defined $pid;
 
@@ -237,10 +253,14 @@ foreach my $repo (@repos)
 	{
 		$0 = "celestial-harvest-".$repo->id;
 
+		# prevent child closing parent's db connection
+		$roar->get_database->{dbh}->{InactiveDestroy} = $db->{dbh}->{InactiveDestroy} = 1;
+
 		# reconnect to the databases after forking
 		$roar->get_database->connect;
-		$dbh = Celestial::DBI->connect;
+		$db = EPrints::Database::Celestial->new( $roar );
 
+NOFORK:
 		if( !$repo->obtain_lock( $$ ) )
 		{
 			if( !$opt_force )
@@ -250,12 +270,12 @@ foreach my $repo (@repos)
 			$repo->release_lock;
 			$repo->obtain_lock( $$ );
 		}
-		update_repository($dbh,
+		update_repository(
 			repository=>$repo,
 			adminEmail=>$ADMINEMAIL
 		);
 		$repo->release_lock;
-		exit;
+		exit if $opt_fork;
 	}
 }
 
@@ -273,45 +293,10 @@ while( scalar keys %CHILDREN )
 	print "(parent) [" . $r->id . "] $pid finished: $?\n" if $opt_verbose;
 }
 
-#print "(parent) Finished harvesting, updating cardinality\n" if $opt_verbose;
-
-#foreach my $repo ($dbh->listRepositories) {
-#	foreach my $mdf ($repo->listMetadataFormats) {
-#		my $tblname = $mdf->table;
-#		my $c = 0;
-#		my $s = 0;
-#		if( $dbh->table_exists($tblname) ) {
-#			$mdf->cardinality( $dbh->cardinality( $tblname ));
-#			$mdf->storage( $dbh->storage( $tblname ));
-#			$mdf->commit;
-#		}
-#	}
-#}
-
-# Check for really broken repositories, and lock them
-#unless( $opt_dryrun ) {
-#	my %repos;
-#	my $sth = $dbh->prepare("SELECT repository,lastHarvest>NOW() - INTERVAL 14 DAY FROM MetadataFormats WHERE lastAttempt is not Null AND lastHarvest is not Null AND lastAttempt > NOW() - INTERVAL 14 DAY");
-#	$sth->execute;
-#	while(my ($id,$not_updated) = $sth->fetchrow_array) {
-#		$repos{$id} = $not_updated unless $repos{$id};
-#	}
-#	foreach my $id ( keys %repos ) {
-#		next if $repos{$id};
-#		my $repo = $dbh->getRepository($id) or next;
-#		print "(parent) Permanently locking $id (".$repo->identifier.")\n" if $opt_verbose;
-#		$dbh->lock($id,0);
-#	}
-#}
-
-$dbh->disconnect;
-
 sub update_repository {
-	my $dbh = shift;
 	my %args = @_;
 	my $repo = $args{repository};
 	my $adminEmail = $args{adminEmail} || '';
-	my $startTime = $dbh->now();
 
 	my ($lastURL, $lastError, $lastResponse);
 
@@ -345,7 +330,6 @@ sub update_repository {
 		$repo->commit;
 		return;
 	}
-	$ha->repository->version( $identify->version );
 
 	$GRANULARITY = WITH_DAYS;
 	if( $identify->granularity and
@@ -360,36 +344,38 @@ sub update_repository {
 #	$repo->Identify( $identify->toDOM->toString );
 #	$repo->commit;
 
-	my $table = $repo->sql_set_table_name;
-	my $tmp_table = $table . "_$$";
-	my $new_table = $table . "_new";
-	my $old_table = $table . "_old";
-
-	$dbh->do("CREATE TABLE IF NOT EXISTS $table $Celestial::Schema::SET");
-	$dbh->do("CREATE TEMPORARY TABLE $tmp_table $Celestial::Schema::SET");
-	$dbh->do("DROP TABLE IF EXISTS $new_table");
-	$dbh->do("CREATE TABLE $new_table $Celestial::Schema::SET");
-
 	$repo->set_status( "ListSets" ); $repo->commit;
 
-	my $ls = $ha->ListSets();
-	while( my $set = $ls->next ) {
-		$dbh->do("INSERT IGNORE $new_table (spec,spec_md5,name) VALUES (?,MD5(?),?)",{},
+	$db->{dbh}->do("UPDATE oai_set SET status='deleted' WHERE celestialid=?",{},$repo->id);
+
+	my $ls = $ha->ListSets(onRecord => sub {
+		my $set = shift;
+		my $rc = $db->{dbh}->do("UPDATE oai_set SET status=NULL AND name=? WHERE celestialid=? AND spec_hash=UNHEX(SHA1(?))",{},
+			$set->setName,
+			$repo->id,
 			$set->setSpec,
-			$set->setSpec,
-			$set->setName
 		);
-	}
+		if( $rc == 0 )
+		{
+			$db->{dbh}->do("INSERT INTO oai_set (celestialid,spec,spec_hash,name) VALUES (?,?,UNHEX(SHA1(?)),?)",{},
+				$repo->id,
+				$set->setSpec,
+				$set->setSpec,
+				$set->setName,
+			);
+		}
+	});
 	if( $ls->is_error ) {
-		$dbh->do("DROP TABLE $new_table");
 		my $lastError = "[" . $repo->id ."] Error requesting ListSets: " . $ls->code . " (" . $ls->message . ")\n";
 		warn ($lastError) if $opt_verbose;
+		$repo->set_value( "messages", [] );
+		$repo->add_message( "error", $repo->{session}->xml->create_text_node( $lastError ) );
+		$repo->commit;
+		return;
 	}
 	else
 	{
-		$dbh->do("INSERT INTO $new_table (setid,spec,spec_md5,name) SELECT $table.setid,$tmp_table.spec,$tmp_table.spec_md5,$tmp_table.name FROM $tmp_table LEFT JOIN $table USING(setid)");
-		$dbh->do("RENAME TABLE $table TO $old_table, $new_table TO $table");
-		$dbh->do("DROP TABLE $old_table");
+		$db->{dbh}->do("DELETE FROM oai_set WHERE celestialid=? AND status='deleted'", {}, $repo->id);
 	}
 
 	$repo->set_status( "ListMetadataFormats" ); $repo->commit;
@@ -399,18 +385,7 @@ sub update_repository {
 		my $lastError = "[" . $repo->id . "] Error requesting ListMetadataFormats: " . $lmdf->code . " (" . $lmdf->message . ")\n";
 		warn ($lastError)
 			if $opt_verbose;
-#		$dbh->addRepositoryError($repo,
-#			$lmdf->request->uri,
-#			$lastError,
-#			$lmdf->content
-#		);
 		return;
-	}
-
-	my $harvest_func = \&harvest_ListRecords;
-	if( $repo->is_set( "method" ) && $repo->value( "method" ) eq "GetRecord" )
-	{
-		$harvest_func = \&harvest_GetRecord;
 	}
 
 	my %mdfs;
@@ -461,12 +436,12 @@ sub update_repository {
 
 	if( $full_freq )
 	{
-		my $ok = $dbh->selectall_arrayref("SELECT ? + INTERVAL ? DAY < NOW()",{},$last_harvest,$full_freq);
+		my $ok = $db->{dbh}->selectall_arrayref("SELECT ? + INTERVAL ? DAY < NOW()",{},$last_harvest,$full_freq);
 		undef $last_harvest if $ok;
 	}
 	if( $freq && $last_harvest )
 	{
-		my $ok = $dbh->selectall_arrayref("SELECT ? + INTERVAL ? DAY < NOW()",{},$last_harvest,$freq);
+		my $ok = $db->{dbh}->selectall_arrayref("SELECT ? + INTERVAL ? DAY < NOW()",{},$last_harvest,$freq);
 		return if !$ok;
 	}
 
@@ -479,12 +454,12 @@ sub update_repository {
 
 	$repo->set_status( "ListRecords" ); $repo->commit;
 
-	my( $last_url, $last_error, $last_response ) = &$harvest_func($dbh,
+	my( $last_url, $last_error, $last_response ) = harvest_ListRecords(
 		harvestAgent => $ha,
 		repository => $repo,
 		metadataFormat => $oai_dc,
 		from => $last_harvest,
-		resumptionToken => $last_token
+		resumptionToken => $last_token,
 	);
 
 	if( $last_error )
@@ -509,7 +484,7 @@ sub update_repository {
 		$repo->set_value( "formats", $mdfs );
 		$repo->commit();
 
-		my $ok = eval { harvest_Fulltext( $dbh,
+		my $ok = eval { harvest_Fulltext( 
 			harvestAgent => $ha,
 			repository => $repo,
 			from => ($opt_allfulltext ? undef : $latest_harvest)
@@ -535,7 +510,7 @@ sub update_repository {
 }
 
 sub harvest_ListRecords {
-	my( $dbh, %args ) = @_;
+	my( %args ) = @_;
 	my( $ha, $repo, $mdf, $from, $set, $token ) = @args{qw(
 		harvestAgent
 		repository
@@ -545,113 +520,100 @@ sub harvest_ListRecords {
 		resumptionToken
 	)};
 
+	my $is_full_harvest = !defined $from;
+	my $dataset = $roar->dataset( "celestial_dc" );
+
 	my $tmp_table = "listrecords_$$";
 
 	# for full harvests, keep a note of new records so we can remove records
 	# that no longer exist
-	if( !defined $from )
+	if( $is_full_harvest )
 	{
-		$dbh->do("DROP TEMPORARY TABLE IF EXISTS $tmp_table");
-		$dbh->do("CREATE TEMPORARY TABLE $tmp_table (recordid INT UNSIGNED NOT NULL, PRIMARY KEY(recordid))");
+		$db->{dbh}->do("DROP TEMPORARY TABLE IF EXISTS $tmp_table");
+		$db->{dbh}->do("CREATE TEMPORARY TABLE $tmp_table (dcid INT UNSIGNED NOT NULL, PRIMARY KEY(dcid))");
 	}
 
-	my $table = $mdf->sql_table_name;
-
-	$dbh->do("CREATE TABLE IF NOT EXISTS $table $Celestial::Schema::RECORD");
-
-	my $set_table = "set_record_".$repo->id;
-
-	$dbh->do("CREATE TABLE IF NOT EXISTS $set_table $Celestial::Schema::SET_RECORD");
-
-	my $spec_table = "set_".$repo->id;
-
-	my $sth_exists = $dbh->prepare("SELECT recordid FROM $table WHERE identifier_md5=MD5(?)");
-	my $sth_set_lookup = $dbh->prepare("SELECT setid FROM $spec_table WHERE spec_md5=MD5(?)");
-
 	# update/initialize the cardinality
-	$mdf->{cardinality} = $dbh->selectall_arrayref("SELECT COUNT(*) FROM $table WHERE status is Null")->[0]->[0];
+	($mdf->{cardinality}) = $db->{dbh}->selectrow_array("SELECT COUNT(*) FROM dc WHERE celestialid = ? AND status is Null", {}, $repo->id);
 	$mdf->commit;
 
 	my $cb = sub {
 		my( $rec, $lr ) = @_;
 
-		$repo->set_status( $lr->request ? "".$lr->request->uri." [".$rec->identifier."]" : "Unknown URI" ); $repo->commit;
-
 		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
+
+		my $request = $lr->request;
+		$repo->set_status( $request ? "".$request->uri." [".$rec->identifier."]" : "Unknown URI" ); $repo->commit;
+
 		return if $opt_dryrun;
 
-		my $accession = $rec->datestamp;
-		$accession = $dbh->now() if !$accession;
+		# note the token (if available)
+		my %q = URI->new( $lr->request->uri )->query_form;
+		$mdf->{token} = $q{resumptionToken};
 
-		my $header = $rec->header->dom->toString;
-		my $metadata = $rec->metadata;
-		$metadata = $metadata->toString if defined $metadata;
-		my $about;
-		for($rec->about)
+		my $datestamp = EPrints::Time::iso_datetime();
+
+		my $dc = defined $rec->metadata ? $rec->metadata->dc : {};
+
+		$dc->{status} = $rec->status;
+		$dc->{datestamp} = $datestamp;
+		$dc->{header} = [{ identifier => $rec->identifier }];
+
+		my( $dcid ) = $db->{dbh}->selectrow_array("SELECT dcid FROM dc WHERE celestialid=? AND identifier_hash=UNHEX(SHA1(?))", {},
+			$repo->id,
+			$rec->identifier
+		);
+
+		if( !defined $dcid )
 		{
-			$about .= $_->dom->documentElement->toString;
-		}
-		$about = "<?xml version='1.0'?>\n<about>$about</about" if defined $about;
+			my $accession = $rec->datestamp;
+			$accession = $datestamp if $accession gt $datestamp;
 
-		my $id;
-
-		$sth_exists->execute( $rec->identifier );
-		if( defined(my $row = $sth_exists->fetch) )
-		{
-			$id = $row->[0];
-			$dbh->do("UPDATE $table
-				SET
-					datestamp=NOW() AND
-					status=? AND
-					header=COMPRESS(?) AND
-					metadata=COMPRESS(?) AND
-					about=COMPRESS(?)
-				WHERE
-					recordid=$id",{},
+			$db->{dbh}->do("INSERT INTO dc (celestialid, status, datestamp, accession, identifier_hash) VALUES (?,?,?,?,UNHEX(SHA1(?)))", {},
+				$repo->id,
 				$rec->status,
-				$header,
-				$metadata,
-				$about
-			);
-		}
-		else
-		{
-			my $sth = $dbh->prepare("INSERT INTO $table
-				(datestamp,accession,identifier,identifier_md5,status,header,metadata,about)
-				VALUES (NOW(),?,?,MD5(?),?,COMPRESS(?),COMPRESS(?),COMPRESS(?))");
-			$sth->execute(
+				$datestamp,
 				$accession,
 				$rec->identifier,
-				$rec->identifier,
-				$rec->status,
-				$header,
-				$metadata,
-				$about
 			);
-			$id = $sth->{'mysql_insertid'}
-				or die "missing mysql_insertid";
+
+			$dcid = $db->{dbh}->{mysql_insertid};
 
 			$mdf->{cardinality}++;
 			$mdf->commit;
 		}
 
-		if( !defined $from )
-		{
-			$dbh->do("INSERT IGNORE INTO $tmp_table (recordid) VALUES ($id)");
-		}
+		$dc->{dcid} = $dcid;
 
-		$dbh->do("DELETE FROM $set_table WHERE recordid=$id");
+		$dc->{oai_set} = [];
+
+		my %sets;
 		foreach my $spec ($rec->header->setSpec)
 		{
-			next if !defined $spec;
-			my @parts = grep { length($_) } split /:/, $spec;
+			my @parts = split ':', $spec;
 			foreach my $i (0..$#parts)
 			{
-				$spec = join ':', @parts[0..$i];
-				$sth_set_lookup->execute( $spec );
-				my( $setid ) = $sth_set_lookup->fetchrow_array or next;
-				$dbh->do("INSERT IGNORE INTO $set_table (recordid,setid) VALUES ($id,$setid)");
+				$sets{join(':', @parts[0..$i])} = undef;
 			}
+		}
+
+		if( %sets )
+		{
+			my $results = $db->{dbh}->selectall_arrayref("SELECT oai_setid FROM oai_set WHERE celestialid=? AND spec_hash IN (".join(',', map { "UNHEX(SHA1(?))" } keys %sets).") ORDER BY oai_setid", {},
+				$repo->id,
+				keys %sets,
+			);
+			$dc->{oai_set} = [
+					map { $_->[0] } @$results
+				];
+		}
+
+		# update the database record
+		$db->update( $dataset, $dc, $dc );
+
+		if( $is_full_harvest )
+		{
+			$db->{dbh}->do("INSERT IGNORE INTO $tmp_table (dcid) VALUES ($dcid)");
 		}
 	};
 
@@ -660,6 +622,9 @@ sub harvest_ListRecords {
 		$ha->ListRecords(
 			resumptionToken=>$token,
 			onRecord => $cb,
+			handlers => {
+				metadata => 'HTTP::OAI::Metadata::OAI_DC',
+			},
 		) :
 		$ha->ListRecords(
 			force=>1, # Force bad metadata prefixes
@@ -667,25 +632,27 @@ sub harvest_ListRecords {
 			from=>datestamp($from, $GRANULARITY == WITH_SECONDS),
 			set=>$set,
 			onRecord => $cb,
+			handlers => {
+				metadata => 'HTTP::OAI::Metadata::OAI_DC',
+			},
 		);
 
-	$mdf->{token} = undef;
+	# all ok, clear the resumptionToken
+	$mdf->{token} = undef if $lr->is_success;
 	$mdf->commit; # update cardinality
 
 	if( $lr->is_error ) {
 		# $lr may be an HTTP::Response
-		my $error = eval { ($lr->errors)[0] };
-		if( defined($token) && defined($error) && $error->code eq "badResumptionToken" )
+		if( defined($token) && $lr->isa( "HTTP::OAI::Response" ) )
 		{
-			undef $token;
-			goto WITHOUT_TOKEN;
-		}
-		# save the resumptionToken
-		my $ctoken = eval { $lr->resumptionToken->resumptionToken };
-		if( defined $ctoken && ( !defined $token || $token ne $ctoken ) )
-		{
-			$mdf->{token} = $ctoken;
-			$mdf->commit;
+			for($lr->error)
+			{
+				if( $_->code eq "badResumptionToken" )
+				{
+					undef $token;
+					goto WITHOUT_TOKEN;
+				}
+			}
 		}
 		return(
 			($lr->request ? $lr->request->uri : 'Unknown URI!'),
@@ -695,197 +662,61 @@ sub harvest_ListRecords {
 	}
 
 	# if this was a full-harvest delete any disappeared records
-	if( !defined $from )
+	if( $is_full_harvest )
 	{
-		my $sth = $dbh->prepare("SELECT recordid FROM $table LEFT JOIN $tmp_table USING(recordid) WHERE $tmp_table.recordid is Null");
-		$sth->execute;
-		while(my ($id) = $sth->fetchrow_array)
-		{
-			$mdf->{cardinality}--;
-			delete_record( 
-				repository => $repo,
-				oai_dc => $mdf,
-				dbh => $dbh,
-				id => $id
-			);
-		}
+		my $sql = "SELECT dcid FROM dc LEFT JOIN $tmp_table USING(dcid) WHERE $tmp_table.dcid is Null";
+		$db->{dbh}->do("DELETE FROM dc WHERE dcid IN ($sql)");
+		($mdf->{cardinality}) = $db->{dbh}->selectrow_array("SELECT COUNT(*) FROM dc WHERE celestialid = ? AND status is Null", {}, $repo->id);
 		$mdf->commit;
 	}
 
 	(undef,undef,undef);
 }
 
-sub delete_record
-{
-	my( %opts ) = @_;
-
-	my $table = $opts{oai_dc}->sql_table_name;
-	my $set_record_table = $opts{repository}->sql_set_record_table_name;
-	my $fulltext_table = $opts{repository}->sql_fulltext_table_name;
-	my $id = $opts{id};
-
-	$opts{dbh}->do("DELETE FROM $table WHERE recordid=$id");
-	$opts{dbh}->do("DELETE FROM $set_record_table WHERE recordid=$id");
-	$opts{dbh}->do("DELETE FROM $fulltext_table WHERE recordid=$id");
-}
-
-sub harvest_GetRecord {
-	my( $dbh, %args ) = @_;
-	my( $ha, $repo, $mdf, $from, $set ) = @args{qw(
-		harvestAgent
-		repository
-		metadataFormat
-		from
-		set
-	)};
-
-	if( defined($opt_identifier) ) {
-		my $r = $ha->GetRecord(
-			identifier=>$opt_identifier,
-			metadataPrefix=>$mdf->metadataPrefix
-		);
-		if( $r->is_error ) {
-			return ($r->request->uri,
-			"(" . $repo->identifier . "/" . $mdf->metadataPrefix . ") Error requresting GetRecord: " . $r->code . " (" . $r->message . ")\n",
-				$r->content,
-			);
-		}
-		my $rec = $r->next || return (undef,undef,undef);
-		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
-		$mdf->addRecord($rec);
-
-		return (undef,undef,undef);
-	}
-	my $li = $ha->ListIdentifiers(from=>$from,set=>$set);
-
-	while( my $id = $li->next ) {
-		my $rec = $ha->GetRecord(
-			identifier=>$id->identifier,
-			metadataPrefix=>$mdf->metadataPrefix,
-		);
-		if( $rec->is_error ) {
-			my $error = "(" . $repo->identifier . "/" . $mdf->metadataPrefix . ") Error retrieving GetRecord for " . $id->identifier . ": " . $rec->code . " (" . $rec->message . ")";
-			warn($error);
-			$dbh->addError($mdf,$error,$rec->content);
-			next;
-		}
-		$rec = $rec->next || next;
-		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
-		$mdf->addRecord($rec);
-# Add a small delay so we don't overrun the repository
-		select(undef,undef,undef,0.25);
-	}
-
-	if( $li->is_error ) {
-		return(
-			$li->request->uri,
-			"(" . $repo->identifier . "/" . $mdf->metadataPrefix . ") Error requesting ListIdentifiers: " . $li->code . " (" . $li->message . ")\n",
-			$li->content
-		);
-	}
-
-	(undef,undef,undef);
-}
-
-sub harvestSetMembership_1_1 {
-	my ($dbh, %args) = @_;
-	my $ha = $args{-harvestAgent};
-	my $repo = $args{-repository};
-	my $from = $args{-from};
-
-	my $sth = $dbh->prepare("SELECT id,setSpec FROM Sets WHERE repository=?");
-	$sth->execute($repo->id);
-
-	my @mdfs = $dbh->listMetadataFormats($repo);
-
-	# For each Set in the repository
-	while( my ($setid,$setSpec) = $sth->fetchrow_array ) {
-# warn $repo->identifier . ": Requesting set $setSpec (" . ($from || 'all') . ")\n";
-		# Request a list of records in that set
-		my $li = $ha->ListIdentifiers(
-			from=>datestamp($from, $GRANULARITY == WITH_SECONDS),
-			set=>$setSpec
-		);
-		if( $li->is_error ) {
-			return(
-				$li->request->uri,
-				"(" . $repo->identifier . "/" . $setSpec . ") Error requesting ListIdentifiers: " . $li->code . " (" . $li->message . ")\n",
-				$li->content
-			);
-		}
-		# For each item in the set
-		while( my $header = $li->next ) {
-			if( $header->is_error ) {
-				return(
-					$header->request->uri,
-					"(" . $repo->identifier . "/" . $setSpec . ") Error requesting ListIdentifiers: " . $header->code . " (" . $header->message . ")\n",
-					$header->content
-				);
-			}
-			# For each metadata format ...
-			foreach my $mdf (@mdfs) {
-				my $id = $dbh->getId($mdf,$header->identifier) || next;
-				# ... and each item record
-				my $rec = $dbh->getRecord($mdf,$id);
-				if( addRecordSetSpec($rec,$setSpec) ) {
-					$mdf->updateRecord(
-						id=>$id,
-						record=>$rec
-					);
-				}
-			}
-		}
-	}
-	$sth->finish;
-	(undef,undef,undef);
-}
-
 sub harvest_Fulltext
 {
 	return unless $opt_fulltext;
-	my( $dbh, %args ) = @_;
+	my( %args ) = @_;
 	my( $ha, $repo, $from ) = @args{qw( harvestAgent repository from )};
 
 	$repo->set_status( "Fulltext" ); $repo->commit;
 
-	my $pronom_table = $repo->sql_pronom_table_name;
-	my $table = $repo->sql_fulltext_table_name;
-
-	$dbh->do("CREATE TABLE IF NOT EXISTS $table $Celestial::Schema::FULLTEXT");
-
 	my $ft = Celestial::FullText->new(
 		repository => $repo,
-		dbh => $dbh,
+		dbh => $db,
 		harvestAgent => $ha,
 	);
 
 	$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
 	$Celestial::FullText::DEBUG = $opt_verbose;
 		
-	my $sth;
+	my $tables = "dc";
+	my @logic = ("celestialid=?");
+	my @values = ($repo->id);
 	if( $from )
 	{
-		$sth = $dbh->prepare("SELECT recordid,identifier,accession FROM record_".$repo->id."_oai_dc WHERE datestamp>=?");
-		$sth->execute( $from );
+		push @logic, "datestamp>=?";
+		$from =~ /^(\d{4}-\d\d-\d\d).(\d\d:\d\d:\d\d)/;
+		push @values, "$1 $2";
 	}
-	else
+	if( $opt_missing )
 	{
-		$sth = $dbh->prepare("SELECT recordid,identifier,accession FROM record_".$repo->id."_oai_dc");
-		$sth->execute;
+		$tables .= " LEFT JOIN dc_fulltext USING(dcid)";
+		push @logic, "dc_fulltext.dcid is Null";
 	}
+	my $sql = "SELECT dcid, accession FROM $tables WHERE ".join(' AND ', @logic);
+	my $sth = $db->{dbh}->prepare( $sql );
+	$sth->execute( @values );
 
-	while( my ($id, $identifier, $accession) = $sth->fetchrow_array )
+	while( my ($id, $accession) = $sth->fetchrow_array )
 	{
-		# Skip if the record already has some full-texts recorded
-		next if $opt_missing && ($dbh->selectrow_array( "SELECT 1 FROM $table WHERE recordid=$id" ));
-		
 		# Remove existing formats for this record
-		$dbh->do("DELETE FROM $table WHERE recordid=$id");
+		$db->{dbh}->do("DELETE FROM dc_fulltext WHERE dcid=$id");
 
 		my @formats = $ft->formats( $id );
-		warn "[".$repo->id."] full-text for [$id] ($identifier) = ".@formats."\n"
-			if $opt_verbose;
+		warn "[".$repo->id."] full-text for [$id] = ".@formats."\n" if $opt_verbose;
 
+		my $pos = 0;
 		foreach my $fmt ( @formats )
 		{
 			my $ds = $accession;
@@ -903,22 +734,14 @@ sub harvest_Fulltext
 			eval { @types = run_file( "$fmt" ) };
 			if( $@ )
 			{
-				warn sprintf("There was a problem running droid for %s (%s): %s\n", $identifier, $fmt, $@);
+				warn "[".$repo->id."] there was a problem running file for [$id]: $@\n";
 				@types = ();
 			}
 			@types = ([undef,'Unknown']) unless @types;
-			foreach my $t (@types)
+			foreach my $mime_type (@types)
 			{
-				warn sprintf("Got format %s for %s\n", $t->[1], $url) if $opt_verbose;
-				$dbh->do("INSERT IGNORE INTO pronom (puid, name) VALUES (?,?)",{},@$t) if defined $t->[0];
-				my( $pronomid ) = $dbh->selectrow_array("SELECT pronomid FROM pronom WHERE puid=?",{},$t->[0]);
-				$dbh->do("INSERT INTO $table (recordid,datestamp,url,mimetype,pronomid) VALUES (?,?,?,?,?)",{},
-					$id,
-					$ds,
-					$url,
-					$ct,
-					$pronomid
-				);
+				warn sprintf("Got format %s for %s\n", $mime_type, $url) if $opt_verbose;
+				$db->{dbh}->do("INSERT INTO dc_fulltext (dcid,pos,fulltext_datestamp,fulltext_url,fulltext_mime_type) VALUES ($id,?,?,?,?)", {}, $pos++, $ds, $url, $mime_type);
 			}
 		}
 	}
@@ -928,31 +751,6 @@ sub harvest_Fulltext
 		if $opt_verbose;
 
 	return $ft;
-}
-
-sub getDcRecord
-{
-	my( $mdf, $id ) = @_;
-
-	my $rec = $mdf->getRecord( $id ) or return;
-
-	return if $rec->header->is_deleted;
-
-	if( not $rec->metadata )
-	{
-		warn sprintf("%s doesn't contain any metadata\n", $rec->identifier);
-		return;
-	}
-
-	my $dc = HTTP::OAI::Metadata::OAI_DC->new();
-	$rec->metadata->set_handler(
-			HTTP::OAI::SAXHandler->new( # Required to supply Text
-				Handler => $dc
-				));
-	$rec->metadata->generate;
-	$rec->metadata( $dc );
-
-	return $rec;
 }
 
 sub getMetsRecord
@@ -1016,9 +814,7 @@ sub run_file {
 	$type =~ s/^(CDF V2 Document).*/$1/; # CDFs contain detailed info, not just type :-(
 	$type =~ s/^.*(HTML document).*/$1/; # as do HTML documents
 
-	my $type_id = "file:".Digest::MD5::md5_base64( $type );
-
-	return [ $type_id, $type ];
+	return $type;
 }
 
 sub run_droid {

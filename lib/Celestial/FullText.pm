@@ -80,7 +80,6 @@ sub guess_repository_type
 		if exists $self->{ server_type };
 
 	my $repo = $self->{repository};
-	my $dbh = $self->{dbh};
 	my $ha = $self->{harvestAgent};
 
 	{
@@ -89,10 +88,10 @@ sub guess_repository_type
 		{
 			return $self->{ server_type } = "eprints";
 		}
-		$uri->path( '/cgi/counter' );
+		$uri->path( '/cgi/handle_404' );
 		my $r = $ha->get( $uri );
 		return $self->{ server_type } = "eprints"
-			if $r->is_success && $r->headers->content_type =~ /^text\/plain\b/;
+			if $r->is_success;
 	}
 
 	foreach my $format ($repo->formats)
@@ -129,7 +128,6 @@ sub formats
 	my( $self, $id ) = @_;
 
 	my $repo = $self->{repository};
-	my $dbh = $self->{dbh};
 	my $oai_dc = $repo->format( "oai_dc" );
 
 	my $st = $self->guess_repository_type();
@@ -143,35 +141,25 @@ sub get_oai_dc
 {
 	my( $self, $id ) = @_;
 
-	my $oai_dc = $self->{repository}->format( "oai_dc" );
-	return if !$oai_dc;
+	my $dataset = $self->{repository}->repository->dataset( "celestial_dc" );
+	my( $dc ) = $self->{dbh}->_get( $dataset, 0, $id );
 
-	my( $identifier,$datestamp,$metadata ) = $self->{dbh}->selectrow_array("SELECT identifier,datestamp,UNCOMPRESS(metadata) FROM ".$oai_dc->sql_table_name." WHERE recordid=?",{},$id);
-	return if !$metadata;
+	return undef if !defined $dc;
 
-	my $rec = HTTP::OAI::Record->new();
-	$rec->header->identifier( $identifier );
-	$rec->header->datestamp( $datestamp );
-
-	my $dc = HTTP::OAI::Metadata::OAI_DC->new();
-	XML::LibXML::SAX->new(
-		Handler => HTTP::OAI::SAXHandler->new( # Required to supply Text
-		Handler => $dc
-	))->parse_string( $metadata );
-	$rec->metadata( $dc );
-
-	return $rec;
+	return $dc->get_data();
 }
 
 sub get_mets
 {
 	my( $self, $id ) = @_;
 
-	my $oai_dc = $self->{repository}->format( "oai_dc" );
-	return if !$oai_dc;
+	my $dataset = $self->{repository}->repository->dataset( "celestial_dc" );
+	my( $dc ) = $self->{dbh}->_get( $dataset, 0, $id );
 
-	my( $identifier ) = $self->{dbh}->selectrow_array("SELECT identifier FROM ".$oai_dc->sql_table_name." WHERE recordid=?",{},$id);
-	return if !$identifier;
+	return undef if !defined $dc;
+
+	my $identifier = $dc->value( "header" )->[0]->{identifier};
+	return if !defined $identifier;
 
 	my $prefix;
 	for($self->{repository}->formats)
@@ -252,10 +240,9 @@ sub run_eprints
 
 	my $ha = $self->{harvestAgent};
 
-	my $rec = $self->get_oai_dc( $id );
-	warn "Failed to retrieve oai_dc"
-		if !$rec && $DEBUG;
-	return if !$rec;
+	my $dc = $self->get_oai_dc( $id );
+	warn "Failed to retrieve oai_dc" if !$dc && $DEBUG;
+	return if !$dc;
 
 	my $bu = URI->new($ha->baseURL)->canonical;
 	$bu->path('');
@@ -271,9 +258,9 @@ sub run_eprints
 
 	my @urls;
 	for(
-		@{$rec->metadata->dc->{ identifier }},
-		@{$rec->metadata->dc->{ format }},
-		@{$rec->metadata->dc->{ relation }}
+		@{$dc->{identifier}||[]},
+		@{$dc->{format}||[]},
+		@{$dc->{relation}||[]},
 		)
 	{
 		my ($fmt,$url) = split / /, $_;
