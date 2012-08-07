@@ -738,10 +738,10 @@ sub harvest_Fulltext
 				@types = ();
 			}
 			@types = ([undef,'Unknown']) unless @types;
-			foreach my $mime_type (@types)
+			foreach my $type (@types)
 			{
-				warn sprintf("Got format %s for %s\n", $mime_type, $url) if $opt_verbose;
-				$db->{dbh}->do("INSERT INTO dc_fulltext (dcid,pos,fulltext_datestamp,fulltext_url,fulltext_mime_type) VALUES ($id,?,?,?,?)", {}, $pos++, $ds, $url, $mime_type);
+				warn sprintf("Got format %s for %s\n", $type->[0], $url) if $opt_verbose;
+				$db->{dbh}->do("INSERT INTO dc_fulltext (dcid,pos,fulltext_datestamp,fulltext_url,fulltext_mime_type,fulltext_format) VALUES ($id,?,?,?,?,?)", {}, $pos++, $ds, $url, $type->[0], $type->[1] );
 			}
 		}
 	}
@@ -805,16 +805,19 @@ sub timestamp {
 sub run_file {
 	my( $fn ) = @_;
 
-	my $type = `file -bz $fn`; # brief, look-inside compressed
-	chomp($type);
+	my $format = `file -bz $fn`; # brief, look-inside compressed
+	chomp($format);
 
-	return () if !$type;
+	return () if !$format;
 	
-	$type =~ s/\(.+$//; # strip commentary
-	$type =~ s/^(CDF V2 Document).*/$1/; # CDFs contain detailed info, not just type :-(
-	$type =~ s/^.*(HTML document).*/$1/; # as do HTML documents
+	$format =~ s/\(.+$//; # strip commentary
+	$format =~ s/^(CDF V2 Document).*/$1/; # CDFs contain detailed info, not just format :-(
+	$format =~ s/^.*(HTML document).*/$1/; # as do HTML documents
 
-	return $type;
+	my $mime_type = `file -ibz $fn`; # mime-type, brief, look-inside compressed
+	$mime_type =~ s/;.*$//; # strip char-set etc.
+
+	return[ $mime_type, $format ];
 }
 
 sub run_droid {
