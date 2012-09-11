@@ -537,10 +537,21 @@ sub harvest_ListRecords {
 	($mdf->{cardinality}) = $db->{dbh}->selectrow_array("SELECT COUNT(*) FROM dc WHERE celestialid = ? AND status is Null", {}, $repo->id);
 	$mdf->commit;
 
+	my $missing_identifier = 0;
+
 	my $cb = sub {
 		my( $rec, $lr ) = @_;
 
 		printf("%s => %s\n", $rec->identifier, $rec->datestamp) if $opt_verbose > 1;
+
+		if( !$rec->identifier )
+		{
+			return if $missing_identifier++;
+			$repo->add_message( "error", $repo->{session}->xml->create_text_node(
+				"Record missing identifier in ".$lr->request->uri
+			) );
+			return;
+		}
 
 		my $request = $lr->request;
 		$repo->set_status( $request ? "".$request->uri." [".$rec->identifier."]" : "Unknown URI" ); $repo->commit;
@@ -567,7 +578,10 @@ sub harvest_ListRecords {
 		if( !defined $dcid )
 		{
 			my $accession = $rec->datestamp;
-			$accession = $datestamp if $accession gt $datestamp;
+			if( !$accession || $accession !~ /^\d{4}-\d\d-\d\d/ || $accession gt $datestamp )
+			{
+				$accession = $datestamp;
+			}
 
 			$db->{dbh}->do("INSERT INTO dc (celestialid, status, datestamp, accession, identifier_hash) VALUES (?,?,?,?,UNHEX(SHA1(?)))", {},
 				$repo->id,

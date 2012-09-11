@@ -321,9 +321,6 @@ use overload '""' => \&to_string;
 use File::Temp;
 use MIME::Types;
 
-our $TMPFILE;
-our $TMPFILE_SIZE = 0;
-
 sub new
 {
 	my( $class, $ft, $url ) = @_;
@@ -332,6 +329,8 @@ sub new
 		ft => $ft,
 		url => $url,
 		harvestAgent => $ft->{harvestAgent},
+		fh => undef,
+		filesize => 0,
 	}, $class;
 
 warn "HEAD $url\n" if $DEBUG;
@@ -361,25 +360,24 @@ sub _get
 		my @exts = $self->mime_type->extensions;
 		$ext = ".".$exts[0] if @exts;
 	}
-	$self->{ fh } = $TMPFILE = File::Temp->new( CLEANUP => 1, SUFFIX => $ext );
-	binmode($TMPFILE);
-	$TMPFILE_SIZE = 0;
+	$self->{ fh } = File::Temp->new( CLEANUP => 1, SUFFIX => $ext );
+	binmode($self->{ fh });
 warn "GET ".$self->url."\n" if $DEBUG;
 
 	return $self->{ harvestAgent }->get( $self->url,
-		':content_cb' => \&Celestial::FullText::Format::_lwpcallback
+		':content_cb' => sub { $self->_lwpcallback( @_ ) }
 	);
 }
 
 sub _lwpcallback
 {
-	my( $data, $r, $proto ) = @_;
-	if( !defined(syswrite($TMPFILE, $data)) ) {
+	my( $self, $data, $r, $proto ) = @_;
+	if( !defined(syswrite($self->{ fh }, $data)) ) {
 		die $!;
 	}
-	$TMPFILE_SIZE += length($data);
+	$self->{filesize} += length($data);
 	if( defined($Celestial::FullText::MAX_FILE_SIZE) and
-		$TMPFILE_SIZE > $Celestial::FullText::MAX_FILE_SIZE )
+		$self->{filesize} > $Celestial::FullText::MAX_FILE_SIZE )
 	{
 		die "toobig\n";
 	}
