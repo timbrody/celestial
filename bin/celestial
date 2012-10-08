@@ -320,6 +320,16 @@ sub update_repository {
 	$repo->set_status( "Identify" ); $repo->commit;
 
 	my $identify = $ha->Identify;
+
+	my $r = $identify->is_success ? $identify->previous : $identify;
+
+	# update code and content-type for basic PMH interface response
+	$repo->set_value( "http_code", $r->code );
+	my $content_type = $r->headers->header( "Content-Type" );
+	$content_type = (split /;/, $content_type)[0] if defined $content_type;
+	$repo->set_value( "http_content_type", $content_type );
+	$repo->commit;
+
 	if( $identify->is_error ) {
 		my $message = "Unable to get Identify: " . $identify->code . " (" . $identify->message . ")\n".$identify->request->uri;
 		warn "[" . $repo->id . "] " . $message if $opt_verbose;
