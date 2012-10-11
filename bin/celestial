@@ -6,7 +6,7 @@ B<celestial> - harvest all new records
 
 =head1 SYNOPSIS
 
-B<celestial> [B<options>]
+B<celestial> [B<options>] [B<repositories>]
 
 =head1 DESCRIPTION
 
@@ -121,12 +121,13 @@ use constant {
 our $opt_verbose;
 our $opt_identifier;
 our $opt_missing;
-my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun, $opt_allfulltext, $opt_migrate, $opt_all, $opt_daemon );
+my( $opt_list, $opt_repository, $opt_help, $opt_cfg, $opt_fork, $opt_force, $opt_fulltext, $opt_dryrun, $opt_allfulltext, $opt_migrate, $opt_all, $opt_daemon, $opt_metadata );
 $opt_dryrun = 0;
 $opt_verbose = 0;
 $opt_fork = 1;
 $opt_fulltext = 1;
 $opt_daemon = 0;
+$opt_metadata = 1;
 
 GetOptions(
 	'verbose+' => \$opt_verbose,
@@ -138,6 +139,7 @@ GetOptions(
 	'identifier=s' => \$opt_identifier,
 	'force' => \$opt_force,
 	'fulltext!' => \$opt_fulltext,
+	'metadata!' => \$opt_metadata,
 	'missing' => \$opt_missing,
 	'dryrun' => \$opt_dryrun,
 	'allfulltext' => \$opt_allfulltext,
@@ -150,6 +152,12 @@ pod2usage(1) if $opt_help;
 
 if( defined($opt_repository) && $opt_repository =~ /\D/ ) {
 	pod2usage("Repository argument must be numeric.");
+}
+
+my @celestialids = @ARGV;
+if( defined $opt_repository )
+{
+	push @celestialids, $opt_repository;
 }
 
 $DEBUG = $opt_verbose;
@@ -216,16 +224,20 @@ $SIG{'USR2'} = sub {
 	}
 };
 
-my @repos = $roar->dataset( "celestial" )->search->slice;
+my $list;
+if( @celestialids )
+{
+	$list = $roar->dataset( "celestial" )->list( \@celestialids );
+}
+else
+{
+	$list = $roar->dataset( "celestial" )->search;
+}
+
 
 # For each repository spawn a child that will update that repository
-foreach my $repo (@repos)
-{
-	if( defined($opt_repository) && $repo->id != $opt_repository )
-	{
-#		print "(parent) " . $repo->id . " ignored due to command line argument\n" if $opt_verbose;
-		next;
-	}
+$list->map(sub {
+	(undef, undef, my $celestial) = @_;
 
 	if( scalar keys %CHILDREN >= $MAX_HARVESTERS )
 	{
@@ -246,12 +258,12 @@ foreach my $repo (@repos)
 	# parent
 	if( $pid )
 	{
-		$CHILDREN{$pid} = $repo;
+		$CHILDREN{$pid} = $celestial;
 	}
 	# child
 	else
 	{
-		$0 = "celestial-harvest-".$repo->id;
+		$0 = "celestial-harvest-".$celestial->id;
 
 		# prevent child closing parent's db connection
 		$roar->get_database->{dbh}->{InactiveDestroy} = $db->{dbh}->{InactiveDestroy} = 1;
@@ -261,23 +273,23 @@ foreach my $repo (@repos)
 		$db = EPrints::Database::Celestial->new( $roar );
 
 NOFORK:
-		if( !$repo->obtain_lock( $$ ) )
+		if( !$celestial->obtain_lock( $$ ) )
 		{
 			if( !$opt_force )
 			{
-				die "[" . $repo->id . "] couldn't obtain lock, ignoring\n";
+				die "[" . $celestial->id . "] couldn't obtain lock, ignoring\n";
 			}
-			$repo->release_lock;
-			$repo->obtain_lock( $$ );
+			$celestial->release_lock;
+			$celestial->obtain_lock( $$ );
 		}
 		update_repository(
-			repository=>$repo,
+			repository=>$celestial,
 			adminEmail=>$ADMINEMAIL
 		);
-		$repo->release_lock;
+		$celestial->release_lock;
 		exit if $opt_fork;
 	}
-}
+});
 
 while( scalar keys %CHILDREN )
 {
@@ -484,15 +496,18 @@ sub update_repository {
 	}
 	else
 	{
-		$oai_dc->{harvest} = $latest_harvest;
-		$oai_dc->{full_harvest} = $latest_harvest if !defined $last_harvest;
-		my $mdfs = EPrints::Utils::clone( $repo->value( "formats" ) );
-		for(@$mdfs)
+		if( $opt_metadata )
 		{
-			$_ = $oai_dc if $_->{prefix} eq 'oai_dc';
+			$oai_dc->{harvest} = $latest_harvest;
+			$oai_dc->{full_harvest} = $latest_harvest if !defined $last_harvest;
+			my $mdfs = EPrints::Utils::clone( $repo->value( "formats" ) );
+			for(@$mdfs)
+			{
+				$_ = $oai_dc if $_->{prefix} eq 'oai_dc';
+			}
+			$repo->set_value( "formats", $mdfs );
+			$repo->commit();
 		}
-		$repo->set_value( "formats", $mdfs );
-		$repo->commit();
 
 		my $ok = eval { harvest_Fulltext( 
 			harvestAgent => $ha,
@@ -520,6 +535,8 @@ sub update_repository {
 }
 
 sub harvest_ListRecords {
+	return if !$opt_metadata;
+
 	my( %args ) = @_;
 	my( $ha, $repo, $mdf, $from, $set, $token ) = @args{qw(
 		harvestAgent
@@ -728,9 +745,23 @@ sub harvest_Fulltext
 		$tables .= " LEFT JOIN dc_fulltext USING(dcid)";
 		push @logic, "dc_fulltext.dcid is Null";
 	}
-	my $sql = "SELECT dcid, accession FROM $tables WHERE ".join(' AND ', @logic);
-	my $sth = $db->{dbh}->prepare( $sql );
+
+	my $sql;
+	my $sth;
+
+	$sql = "SELECT COUNT(*) FROM $tables WHERE ".join(' AND ', @logic);
+	$sth = $db->{dbh}->prepare( $sql );
 	$sth->execute( @values );
+	
+	my( $total ) = $sth->fetchrow_array;
+
+	warn "Harvesting fulltext for $total records [$sql]\n" if $opt_verbose;
+
+	$sql = "SELECT dcid, accession FROM $tables WHERE ".join(' AND ', @logic);
+	$sth = $db->{dbh}->prepare( $sql );
+	$sth->execute( @values );
+
+	my $c = 0;
 
 	while( my ($id, $accession) = $sth->fetchrow_array )
 	{
@@ -768,6 +799,8 @@ sub harvest_Fulltext
 				$db->{dbh}->do("INSERT INTO dc_fulltext (dcid,pos,fulltext_datestamp,fulltext_url,fulltext_mime_type,fulltext_format) VALUES ($id,?,?,?,?,?)", {}, $pos++, $ds, $url, $type->[0], $type->[1] );
 			}
 		}
+
+		$repo->set_status( sprintf('Fulltext %d%%', 100*$c++/$total) ); $repo->commit;
 	}
 	$sth->finish;
 
