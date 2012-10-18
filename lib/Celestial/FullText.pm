@@ -88,10 +88,10 @@ sub guess_repository_type
 		{
 			return $self->{ server_type } = "eprints";
 		}
-		$uri->path( '/cgi/handle_404' );
+		$uri->path( '/cgi/users/home' );
 		my $r = $ha->get( $uri );
 		return $self->{ server_type } = "eprints"
-			if $r->is_success;
+			if $r->code eq 401;
 	}
 
 	foreach my $format ($repo->formats)

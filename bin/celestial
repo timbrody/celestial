@@ -728,6 +728,8 @@ sub harvest_Fulltext
 		harvestAgent => $ha,
 	);
 
+	warn "(".$repo->id.") Harvesting using heuristics for " . $ft->guess_repository_type if $opt_verbose;
+
 	$Celestial::FullText::MAX_FILE_SIZE = $MAX_FILE_SIZE;
 	$Celestial::FullText::DEBUG = $opt_verbose;
 		
