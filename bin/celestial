@@ -872,6 +872,7 @@ sub run_file {
 	$format =~ s/^.*(HTML document).*/$1/; # as do HTML documents
 
 	my $mime_type = `file -ibz $fn`; # mime-type, brief, look-inside compressed
+	chomp($mime_type);
 	$mime_type =~ s/;.*$//; # strip char-set etc.
 
 	return[ $mime_type, $format ];

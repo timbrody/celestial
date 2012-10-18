@@ -307,7 +307,7 @@ sub run_mets
 
 	unless( @urls )
 	{
-		warn $rec->identifier . " - METS - didn't contain any URLs";
+		warn $rec->identifier . " - METS - didn't contain any URLs" if $DEBUG;
 	}
 
 	return
