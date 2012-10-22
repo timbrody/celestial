@@ -88,10 +88,10 @@ sub guess_repository_type
 		{
 			return $self->{ server_type } = "eprints";
 		}
-		$uri->path( '/cgi/users/home' );
+		$uri->path( '/cgi/oai2' );
+		$uri->query( 'verb=Identify' );
 		my $r = $ha->get( $uri );
-		return $self->{ server_type } = "eprints"
-			if $r->code eq 401;
+		return $self->{ server_type } = "eprints" if $r->content =~ /EPrints/;
 	}
 
 	foreach my $format ($repo->formats)
@@ -104,12 +104,12 @@ sub guess_repository_type
 
 	if( defined(my $host = $repo->parent) )
 	{
-		if( $host->is_set( "version" ) )
+		if( $host->is_set( "software" ) )
 		{
-			my $version = $host->value( "version" );
+			my $version = $host->value( "software" );
 			if( $self->can( "run_$version" ) )
 			{
-				return $self->{ server_type } = $host->value( "version" );
+				return $self->{ server_type } = $host->value( "software" );
 			}
 		}
 	}
