@@ -231,7 +231,9 @@ if( @celestialids )
 }
 else
 {
-	$list = $roar->dataset( "celestial" )->search;
+	$list = $roar->dataset( "celestial" )->search(
+		custom_order => "cardinality"
+	);
 }
 
 
@@ -331,7 +333,10 @@ sub update_repository {
 
 	$repo->set_status( "Identify" ); $repo->commit;
 
+	# quickly check Identify, otherwise we'll be really patient
+	$ha->timeout(10);
 	my $identify = $ha->Identify;
+	$ha->timeout($HTTP_TIMEOUT);
 
 	my $r = $identify->is_success ? $identify->previous : $identify;
 
@@ -531,6 +536,27 @@ sub update_repository {
 		$repo->commit();
 	}
 
+	# Update ROAR
+	my @plugins;
+	push @plugins, $roar->plugin( "Export::ROAR::CelestialSync" );
+
+	$roar->dataset( "archive" )->search(filters => [
+		{
+			meta_fields => ["registry"],
+			value => {
+				name => "celestial",
+				id => $repo->id,
+			},
+			match => "EX",
+		}
+	])->map(sub {
+		(undef, undef, my $eprint) = @_;
+
+		foreach my $plugin (@plugins) {
+			$plugin->output_dataobj( $eprint );
+		}
+	});
+
 	1;
 }
 
@@ -563,6 +589,8 @@ sub harvest_ListRecords {
 	# update/initialize the cardinality
 	($mdf->{cardinality}) = $db->{dbh}->selectrow_array("SELECT COUNT(*) FROM dc WHERE celestialid = ? AND status is Null", {}, $repo->id);
 	$mdf->commit;
+	$repo->set_value( "cardinality", $mdf->{cardinality} );
+	$repo->commit;
 
 	my $missing_identifier = 0;
 
@@ -682,6 +710,9 @@ sub harvest_ListRecords {
 	$mdf->{token} = undef if $lr->is_success;
 	$mdf->commit; # update cardinality
 
+	$repo->set_value( "cardinality", $mdf->{cardinality} );
+	$repo->commit;
+
 	if( $lr->is_error ) {
 		# $lr may be an HTTP::Response
 		if( defined($token) && $lr->isa( "HTTP::OAI::Response" ) )
@@ -705,8 +736,24 @@ sub harvest_ListRecords {
 	# if this was a full-harvest delete any disappeared records
 	if( $is_full_harvest )
 	{
-		my $sql = "SELECT dcid FROM dc LEFT JOIN $tmp_table USING(dcid) WHERE $tmp_table.dcid is Null";
-		$db->{dbh}->do("DELETE FROM dc WHERE dcid IN ($sql)");
+		# while there are missing records, delete them 1000 at a time
+		while(1)
+		{
+			my $sql = "SELECT dcid FROM dc LEFT JOIN $tmp_table USING(dcid) WHERE dc.celestialid=".$repo->id." AND $tmp_table.dcid is Null LIMIT 1000";
+			my $sth = $db->{dbh}->prepare($sql);
+			$sth->execute;
+			$sth->bind_columns(\my $id);
+			my @ids;
+			while($sth->fetch) {
+				push @ids, $id;
+			}
+			if( @ids ) {
+				$db->{dbh}->do("DELETE FROM dc WHERE dcid IN (".join(',', @ids).")");
+			}
+			else {
+				last;
+			}
+		}
 		($mdf->{cardinality}) = $db->{dbh}->selectrow_array("SELECT COUNT(*) FROM dc WHERE celestialid = ? AND status is Null", {}, $repo->id);
 		$mdf->commit;
 	}
