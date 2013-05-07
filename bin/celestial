@@ -181,13 +181,6 @@ our $roar = EPrints->new->repository( "roar", noise => $opt_verbose );
 
 my $cfg  = Celestial::Config->new( $opt_cfg );
 
-$roar->{config}->{celestial}->{database} = {
-	name => "celestial",
-	host => "goliath-dmz",
-	user => "oaia",
-	pass => undef,
-};
-
 use EPrints::Database::Celestial;
 our $db = EPrints::Database::Celestial->new( $roar )
 	or die "Unable to connect to database: $DBI::errstr";

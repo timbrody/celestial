@@ -190,11 +190,11 @@ sub run_dspace
 
 	my $ha = $self->{harvestAgent};
 
-	my $rec = $self->get_oai_dc( $id );
-	return if !$rec;
+	my $dc = $self->get_oai_dc( $id );
+	return if !$dc;
 
 	my @fmts;
-	my( $jo_url ) = grep { /^https?:\/\// } @{$rec->metadata->dc->{ identifier }};
+	my( $jo_url ) = grep { /^https?:\/\// } @{$dc->{ identifier }};
 	if( !defined $jo_url )
 	{
 		return ();
