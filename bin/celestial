@@ -142,6 +142,7 @@ GetOptions(
 	'metadata!' => \$opt_metadata,
 	'missing' => \$opt_missing,
 	'dryrun' => \$opt_dryrun,
+	'dry-run' => \$opt_dryrun,
 	'allfulltext' => \$opt_allfulltext,
 	'migrate' => \$opt_migrate,
 	'all' => \$opt_all,
@@ -179,7 +180,7 @@ if( $opt_verbose > 2 )
 
 our $roar = EPrints->new->repository( "roar", noise => $opt_verbose );
 
-my $cfg  = Celestial::Config->new( $opt_cfg );
+#my $cfg  = Celestial::Config->new( $opt_cfg );
 
 use EPrints::Database::Celestial;
 our $db = EPrints::Database::Celestial->new( $roar )
@@ -188,9 +189,9 @@ our $db = EPrints::Database::Celestial->new( $roar )
 $ADMINEMAIL = $roar->config( "adminemail" ) or die "adminemail required to harvest\n";
 $MAX_HARVESTERS = $roar->config( "celestial", "threads" ) || 10;
 
-$JAVA = $cfg->get_conf( "java" ) || $JAVA;
-$DROID = $cfg->get_conf( "droid", "jar" ) || $DROID;
-$DROID_SIG = $cfg->get_conf( "droid", "signature" ) || $DROID_SIG;
+#$JAVA = $cfg->get_conf( "java" ) || $JAVA;
+#$DROID = $cfg->get_conf( "droid", "jar" ) || $DROID;
+#$DROID_SIG = $cfg->get_conf( "droid", "signature" ) || $DROID_SIG;
 
 # Set up the environment
 $0 = "celestial-harvest";
@@ -710,7 +711,7 @@ sub harvest_ListRecords {
 		# $lr may be an HTTP::Response
 		if( defined($token) && $lr->isa( "HTTP::OAI::Response" ) )
 		{
-			for($lr->error)
+			for($lr->errors)
 			{
 				if( $_->code eq "badResumptionToken" )
 				{
